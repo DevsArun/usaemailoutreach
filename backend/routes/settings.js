@@ -66,7 +66,7 @@ router.get('/smtp', async (req, res, next) => {
 
 router.post('/smtp', smtpValidation, async (req, res, next) => {
   try {
-    const { provider, email, password, host, port, daily_limit } = req.body;
+    const { provider, email, password, host, port, daily_limit, imap_host, imap_port } = req.body;
 
     let smtpHost = host;
     let smtpPort = port;
@@ -95,6 +95,8 @@ router.post('/smtp', smtpValidation, async (req, res, next) => {
       host: smtpHost,
       port: smtpPort || 587,
       secure,
+      imap_host: imap_host || null,
+      imap_port: imap_port || null,
       daily_limit: daily_limit || 500,
     });
 
@@ -130,7 +132,7 @@ router.put('/smtp/:id', async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'SMTP account not found.' });
     }
 
-    const { email, password, host, port, daily_limit, status } = req.body;
+    const { email, password, host, port, daily_limit, status, imap_host, imap_port } = req.body;
     await account.update({
       ...(email && { email }),
       ...(password && { password }),
@@ -138,6 +140,8 @@ router.put('/smtp/:id', async (req, res, next) => {
       ...(port && { port }),
       ...(daily_limit && { daily_limit }),
       ...(status && { status }),
+      ...(imap_host !== undefined && { imap_host }),
+      ...(imap_port !== undefined && { imap_port }),
     });
 
     res.json({

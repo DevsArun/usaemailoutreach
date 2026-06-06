@@ -181,6 +181,26 @@ async function connectServices() {
 
   appStatus.ready = true;
   logger.info('🚀 All services ready!');
+
+  // ── Inbound reply poller (IMAP) ────────────────────────────────────
+  // Periodically scans configured mailboxes for replies to outreach
+  // emails, auto-classifies them, and advances the pipeline. Runs in
+  // process (no Redis required) and fails soft.
+  try {
+    const { syncAllReplies } = require('./services/imapService');
+    const intervalMin = parseInt(process.env.REPLY_POLL_INTERVAL_MIN) || 5;
+
+    const runReplySync = () => {
+      syncAllReplies().catch(err => logger.warn('Reply sync error:', err.message));
+    };
+
+    // First run shortly after startup, then on an interval.
+    setTimeout(runReplySync, 60 * 1000);
+    setInterval(runReplySync, intervalMin * 60 * 1000);
+    logger.info(`📥 Reply poller active (every ${intervalMin} min)`);
+  } catch (err) {
+    logger.warn('Reply poller not started:', err.message);
+  }
 }
 
 // ─── SIGNAL HANDLERS ─────────────────────────────────────────────────

@@ -161,6 +161,7 @@ const API = (() => {
     replies: {
       list: () => request('GET', '/replies'),
       respond: (id, body) => request('POST', `/replies/${id}/respond`, { body }),
+      sync: () => request('POST', '/replies/sync'),
     },
 
     // ---- Pipeline ----

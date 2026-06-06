@@ -91,6 +91,7 @@ async function sendOutreachEmail(outreachId, userId) {
       sent_at: new Date(),
       from_email: account.email,
       smtp_account_id: account.id,
+      message_id: info.messageId || null,
     });
 
     await account.update({ sent_today: account.sent_today + 1 });

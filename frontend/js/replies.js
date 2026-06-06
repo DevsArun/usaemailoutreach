@@ -259,5 +259,20 @@ const Replies = (() => {
     // Quick reply form is set up dynamically in renderDetail
   }
 
-  return { init, selectReply, sendReply, insertTemplate, loadReplies };
+  async function syncInbox() {
+    const btn = document.getElementById('syncRepliesBtn');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Syncing...'; }
+    try {
+      const result = await API.replies.sync();
+      Toast.success(result.message || 'Inbox synced.');
+      await loadReplies();
+    } catch (err) {
+      Toast.error(err.message || 'Failed to sync inbox.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = orig || '📥 Sync Inbox'; }
+    }
+  }
+
+  return { init, selectReply, sendReply, insertTemplate, loadReplies, syncInbox };
 })();

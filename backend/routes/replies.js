@@ -3,10 +3,27 @@ const { OutreachEmail, Business, Campaign, Followup } = require('../models');
 const authenticate = require('../middleware/auth');
 const { callGroq } = require('../config/groq');
 const { enqueue } = require('../queues');
+const { syncRepliesForUser } = require('../services/imapService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 router.use(authenticate);
+
+// Manually trigger an inbound reply sync for the current user's mailboxes.
+router.post('/sync', async (req, res, next) => {
+  try {
+    const result = await syncRepliesForUser(req.user.id);
+    res.json({
+      success: true,
+      message: result.accountsChecked === 0
+        ? 'No SMTP accounts configured. Add one in Settings to receive replies.'
+        : `Checked ${result.accountsChecked} mailbox(es). ${result.newReplies} new repl${result.newReplies === 1 ? 'y' : 'ies'} found.`,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try {
