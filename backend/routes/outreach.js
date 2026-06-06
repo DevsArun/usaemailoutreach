@@ -3,7 +3,7 @@ const { OutreachEmail, Business, Campaign, Email, Followup } = require('../model
 const authenticate = require('../middleware/auth');
 const { outreachEditValidation, paginationValidation } = require('../utils/validators');
 const { buildPaginationMeta } = require('../utils/helpers');
-const { getEmailQueue } = require('../queues');
+const { enqueue } = require('../queues');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -200,8 +200,7 @@ router.post('/:id/send', async (req, res, next) => {
 
     await outreach.update({ status: 'queued' });
 
-    const emailQueue = getEmailQueue();
-    await emailQueue.add('send-outreach', {
+    await enqueue('email-queue', 'send-outreach', {
       outreachId: outreach.id,
       userId: req.user.id,
     }, {
@@ -258,12 +257,11 @@ router.post('/send-bulk', async (req, res, next) => {
       where: { id: outreach_ids, status: 'approved' },
     });
 
-    const emailQueue = getEmailQueue();
     let queued = 0;
 
     for (const outreach of outreachEmails) {
       await outreach.update({ status: 'queued' });
-      await emailQueue.add('send-outreach', {
+      await enqueue('email-queue', 'send-outreach', {
         outreachId: outreach.id,
         userId: req.user.id,
       }, {

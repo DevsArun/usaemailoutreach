@@ -3,7 +3,7 @@ const { Campaign, Business, OutreachEmail, AnalyticsEvent } = require('../models
 const authenticate = require('../middleware/auth');
 const { campaignValidation, paginationValidation } = require('../utils/validators');
 const { parseSearchQuery, buildPaginationMeta } = require('../utils/helpers');
-const { getCampaignQueue } = require('../queues');
+const { enqueue } = require('../queues');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -154,8 +154,7 @@ router.put('/:id/start', async (req, res, next) => {
       },
     });
 
-    const campaignQueue = getCampaignQueue();
-    await campaignQueue.add('process-campaign', {
+    await enqueue('campaign-queue', 'process-campaign', {
       campaignId: campaign.id,
       userId: req.user.id,
     }, {

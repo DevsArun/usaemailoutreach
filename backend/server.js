@@ -146,24 +146,23 @@ async function connectServices() {
     logger.error('❌ Models module error:', err.message);
   }
 
-  // Redis + BullMQ
+  // Redis + BullMQ (optional — falls back to in-process jobs if unavailable)
   try {
-    const { initQueues } = require('./queues');
+    const { initQueues, isUsingRedis } = require('./queues');
     const { initWorkers } = require('./queues/workers');
-    for (let attempt = 1; attempt <= 30; attempt++) {
-      try {
-        await initQueues();
-        await initWorkers();
-        logger.info(`✅ Queues & Workers started (attempt ${attempt})`);
-        appStatus.redis = true;
-        break;
-      } catch (err) {
-        logger.error(`❌ Queue attempt ${attempt}/30: ${err.message}`);
-        await new Promise(r => setTimeout(r, 5000));
-      }
+
+    await initQueues();
+    if (isUsingRedis()) {
+      await initWorkers();
+      appStatus.redis = true;
+      logger.info('✅ Queues & Workers started (Redis mode)');
+    } else {
+      appStatus.redis = false;
+      logger.info('✅ Job runner ready (in-process mode, no Redis required)');
     }
   } catch (err) {
     logger.error('❌ Queues module error:', err.message);
+    logger.warn('Continuing in in-process job mode.');
   }
 
   appStatus.ready = true;

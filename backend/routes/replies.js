@@ -2,7 +2,7 @@ const express = require('express');
 const { OutreachEmail, Business, Campaign, Followup } = require('../models');
 const authenticate = require('../middleware/auth');
 const { callGroq } = require('../config/groq');
-const { getEmailQueue } = require('../queues');
+const { enqueue } = require('../queues');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -86,8 +86,7 @@ router.post('/:id/respond', async (req, res, next) => {
       status: 'approved',
     });
 
-    const emailQueue = getEmailQueue();
-    await emailQueue.add('send-followup', {
+    await enqueue('email-queue', 'send-followup', {
       followupId: followup.id,
       outreachId: outreach.id,
       userId: req.user.id,

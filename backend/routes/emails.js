@@ -3,7 +3,7 @@ const { Email, Business, Campaign } = require('../models');
 const authenticate = require('../middleware/auth');
 const { paginationValidation } = require('../utils/validators');
 const { buildPaginationMeta } = require('../utils/helpers');
-const { getVerifyQueue } = require('../queues');
+const { enqueue } = require('../queues');
 
 const router = express.Router();
 router.use(authenticate);
@@ -72,8 +72,7 @@ router.post('/:id/verify', async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Email not found.' });
     }
 
-    const verifyQueue = getVerifyQueue();
-    await verifyQueue.add('verify-email', {
+    await enqueue('verify-queue', 'verify-email', {
       emailId: email.id,
       emailAddress: email.email,
     }, {
@@ -97,7 +96,6 @@ router.post('/verify-bulk', async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Provide email_ids array.' });
     }
 
-    const verifyQueue = getVerifyQueue();
     let queued = 0;
 
     for (const emailId of email_ids) {
@@ -114,7 +112,7 @@ router.post('/verify-bulk', async (req, res, next) => {
       });
 
       if (email) {
-        await verifyQueue.add('verify-email', {
+        await enqueue('verify-queue', 'verify-email', {
           emailId: email.id,
           emailAddress: email.email,
         }, {
