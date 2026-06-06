@@ -7,17 +7,31 @@ const logger = require('../utils/logger');
 
 const SCRAPER_URL = process.env.SCRAPER_SERVICE_URL || 'http://localhost:8000';
 
-async function processCampaign(campaignId, userId) {
+async function processCampaign(campaignId, userId, options = {}) {
+  const { skipDiscovery = false } = options;
   const campaign = await Campaign.findByPk(campaignId);
   if (!campaign) throw new Error(`Campaign ${campaignId} not found`);
 
   try {
-    logger.info(`Starting campaign pipeline: ${campaignId} - "${campaign.query}"`);
+    logger.info(`Starting campaign pipeline: ${campaignId} - "${campaign.query}"${skipDiscovery ? ' (imported)' : ''}`);
 
     if (campaign.status !== 'running') return;
-    await updateProgress(campaign, 'scraping');
-    const businesses = await discoverBusinesses(campaign);
-    logger.info(`Discovered ${businesses.length} businesses for campaign ${campaignId}`);
+
+    let businesses;
+    if (skipDiscovery) {
+      // Leads were imported (e.g. from a Colab Google Maps scrape). Process the
+      // businesses already stored for this campaign instead of scraping Google.
+      await updateProgress(campaign, 'crawling_websites');
+      businesses = await Business.findAll({ where: { campaign_id: campaignId } });
+      await campaign.update({
+        progress: { ...campaign.progress, businesses_found: businesses.length },
+      });
+      logger.info(`Processing ${businesses.length} imported businesses for campaign ${campaignId}`);
+    } else {
+      await updateProgress(campaign, 'scraping');
+      businesses = await discoverBusinesses(campaign);
+      logger.info(`Discovered ${businesses.length} businesses for campaign ${campaignId}`);
+    }
 
     for (let i = 0; i < businesses.length; i++) {
       const freshCampaign = await Campaign.findByPk(campaignId);
@@ -417,6 +431,75 @@ async function updateProgress(campaign, stage, extra = {}) {
   });
 }
 
+/**
+ * Ingest businesses scraped externally (e.g. a Google Colab Google Maps run)
+ * into a campaign. Creates Business + Review records (de-duplicated). The rest
+ * of the pipeline (website crawl, email discovery+verification, AI analysis,
+ * outreach) then runs normally — none of which is blocked on a datacenter IP.
+ * Returns the number of businesses created.
+ */
+async function importBusinesses(campaignId, businessesData) {
+  let created = 0;
+  let reviewsStored = 0;
+
+  for (const biz of (businessesData || [])) {
+    const name = (biz.name || biz['Business Name'] || '').toString().trim();
+    if (!name) continue;
+
+    const address = (biz.address || biz['Address'] || '').toString().trim();
+
+    const existing = await Business.findOne({
+      where: { campaign_id: campaignId, name, address },
+    });
+    if (existing) continue;
+
+    const ratingRaw = biz.rating ?? biz['Rating'];
+    const reviewsCountRaw = biz.reviews_count ?? biz['Total Reviews'];
+
+    const business = await Business.create({
+      campaign_id: campaignId,
+      name,
+      address,
+      phone: (biz.phone || biz['Phone'] || '').toString().trim(),
+      website: (biz.website || biz['Website'] || '').toString().replace(/^No Website.*/i, '').trim(),
+      rating: parseFloat(ratingRaw) || null,
+      reviews_count: parseInt(reviewsCountRaw) || 0,
+      category: (biz.category || biz['Business Type'] || '').toString().trim(),
+      source: 'google_maps_import',
+    });
+    created++;
+
+    // Reviews may arrive as an array OR as the Colab CSV's "|+|"-joined string.
+    let reviews = [];
+    if (Array.isArray(biz.reviews)) {
+      reviews = biz.reviews;
+    } else {
+      const raw = biz.reviews || biz['Recent Reviews (Last 20)'] || '';
+      if (raw && typeof raw === 'string' && raw !== 'No Reviews Found' && raw !== 'No Reviews Extracted') {
+        reviews = raw.split('|+|').map(s => ({ text: s.trim() })).filter(r => r.text);
+      }
+    }
+
+    for (const rev of reviews.slice(0, 20)) {
+      try {
+        await Review.create({
+          business_id: business.id,
+          reviewer_name: rev.reviewer_name || 'Anonymous',
+          rating: parseInt(rev.rating) || 0,
+          text: (rev.text || '').toString().slice(0, 5000),
+          review_date: rev.date || '',
+          source: 'google_maps',
+        });
+        reviewsStored++;
+      } catch (e) { /* skip bad review */ }
+    }
+  }
+
+  logger.info(`Imported ${created} businesses (${reviewsStored} reviews) into campaign ${campaignId}`);
+  return created;
+}
+
 module.exports = {
   processCampaign,
+  importBusinesses,
 };

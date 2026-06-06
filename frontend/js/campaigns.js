@@ -335,5 +335,71 @@ const Campaigns = (() => {
     }
   }
 
-  return { init, start, pause, stop, reset, deleteCampaign, viewDetail, loadCampaigns };
+  // ---- Import leads (from Colab Google Maps scrape) ----
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i], next = text[i + 1];
+      if (inQuotes) {
+        if (c === '"' && next === '"') { field += '"'; i++; }
+        else if (c === '"') { inQuotes = false; }
+        else { field += c; }
+      } else {
+        if (c === '"') { inQuotes = true; }
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\r') { /* skip */ }
+        else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+        else { field += c; }
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function csvToObjects(text) {
+    const rows = parseCSV(text).filter(r => r.length && r.some(c => c.trim() !== ''));
+    if (rows.length < 2) return [];
+    const headers = rows[0].map(h => h.trim());
+    return rows.slice(1).map(r => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = (r[i] || '').trim(); });
+      return obj;
+    });
+  }
+
+  async function importLeads(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    try {
+      const text = await file.text();
+      let businesses = [];
+      if (file.name.toLowerCase().endsWith('.json')) {
+        const parsed = JSON.parse(text);
+        businesses = Array.isArray(parsed) ? parsed : (parsed.businesses || []);
+      } else {
+        businesses = csvToObjects(text);
+      }
+
+      if (!businesses.length) {
+        Toast.error('No rows found in the file.');
+        return;
+      }
+
+      const defaultName = file.name.replace(/\.(csv|json)$/i, '');
+      const query = (prompt('Campaign name for these imported leads:', defaultName) || defaultName).trim();
+      if (!query) return;
+
+      Toast.info(`Importing ${businesses.length} leads…`);
+      const result = await API.campaigns.import({ query, businesses });
+      Toast.success(result.message || 'Leads imported! Processing started.');
+      await loadCampaigns();
+    } catch (err) {
+      Toast.error(err.message || 'Import failed. Check the file format.');
+    }
+  }
+
+  return { init, start, pause, stop, reset, deleteCampaign, viewDetail, loadCampaigns, importLeads };
 })();

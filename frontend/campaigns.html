@@ -35,6 +35,8 @@
             <option value="stopped">Stopped</option>
             <option value="completed">Completed</option>
           </select>
+          <button class="btn btn-secondary" onclick="document.getElementById('importLeadsFile').click()">📥 Import Leads (CSV/JSON)</button>
+          <input type="file" id="importLeadsFile" accept=".csv,.json" style="display:none;" onchange="Campaigns.importLeads(this)">
           <button class="btn btn-primary" onclick="Modal.open('createCampaignModal')">+ New Campaign</button>
         </div>
       </div>

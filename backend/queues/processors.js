@@ -21,8 +21,8 @@ const logger = require('../utils/logger');
 
 // ─── campaign-queue ──────────────────────────────────────────────────
 async function processCampaignJob(data) {
-  const { campaignId, userId } = data;
-  await processCampaign(campaignId, userId);
+  const { campaignId, userId, skipDiscovery } = data;
+  await processCampaign(campaignId, userId, { skipDiscovery: !!skipDiscovery });
 }
 
 // ─── analyze-queue ───────────────────────────────────────────────────

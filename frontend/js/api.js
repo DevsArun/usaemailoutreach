@@ -134,6 +134,7 @@ const API = (() => {
       list: () => request('GET', '/campaigns'),
       get: (id) => request('GET', `/campaigns/${id}`),
       create: (data) => request('POST', '/campaigns', data),
+      import: (data) => request('POST', '/campaigns/import', data),
       start: (id) => request('PUT', `/campaigns/${id}/start`),
       pause: (id) => request('PUT', `/campaigns/${id}/pause`),
       stop: (id) => request('PUT', `/campaigns/${id}/stop`),
