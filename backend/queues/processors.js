@@ -110,6 +110,11 @@ async function processGenerateOutreachJob(data) {
     business.ai_analysis || {}
   );
 
+  if (!emailContent) {
+    logger.info(`Skipping outreach for ${business.name} — AI unavailable (no personalized email generated).`);
+    return;
+  }
+
   await OutreachEmail.create({
     business_id: business.id,
     campaign_id: campaignId,

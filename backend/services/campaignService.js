@@ -398,6 +398,14 @@ async function generateOutreach(business, campaign) {
     business.ai_analysis || {}
   );
 
+  // Only persist genuinely AI-personalized emails. If the AI is unavailable
+  // (e.g. no Groq key) generateOutreachEmail returns null and we skip — no
+  // generic/templated drafts are ever created.
+  if (!emailContent) {
+    logger.info(`Skipping outreach for ${business.name} — AI did not produce a personalized email.`);
+    return;
+  }
+
   await OutreachEmail.create({
     business_id: business.id,
     campaign_id: campaign.id,

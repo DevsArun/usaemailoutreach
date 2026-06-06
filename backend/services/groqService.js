@@ -1,6 +1,9 @@
 const { callGroq } = require('../config/groq');
 const logger = require('../utils/logger');
 
+// Signature name used to sign every outreach email.
+const SENDER_NAME = process.env.OUTREACH_SENDER_NAME || 'DevsArun';
+
 const SERVICE_CATALOG = {
   website_dev: { name: 'Website Development', keywords: ['no website', 'poor website', 'outdated'] },
   website_redesign: { name: 'Website Redesign', keywords: ['slow', 'not mobile friendly', 'poor design'] },
@@ -94,77 +97,106 @@ ${reviewsSummary || 'No reviews available'}`,
 }
 
 async function generateOutreachEmail(business, reviews, websiteAnalysis, aiAnalysis) {
-  const topPainPoints = (aiAnalysis.pain_points || [])
-    .filter(p => p.severity === 'high')
-    .slice(0, 3)
-    .map(p => p.issue);
+  // ── Build rich, business-specific context for maximum personalization ──
+  const websiteFindings = [];
+  if (websiteAnalysis && websiteAnalysis.url) {
+    if (!websiteAnalysis.has_booking) websiteFindings.push('no online booking/appointment system');
+    if (!websiteAnalysis.has_whatsapp) websiteFindings.push('no WhatsApp contact option');
+    if (!websiteAnalysis.has_chatbot && !websiteAnalysis.has_live_chat) websiteFindings.push('no live chat / chatbot');
+    if (!websiteAnalysis.has_crm) websiteFindings.push('no visible lead-capture/CRM');
+    if (!websiteAnalysis.has_lead_capture) websiteFindings.push('no lead-capture form');
+    if (websiteAnalysis.mobile_friendly === false) websiteFindings.push('website is not mobile-friendly');
+    if (websiteAnalysis.ssl === false) websiteFindings.push('no SSL/secure connection');
+    if (websiteAnalysis.page_speed && websiteAnalysis.page_speed < 50) websiteFindings.push('slow page-load speed');
+  } else {
+    websiteFindings.push('no website found online (huge missed-opportunity for a business this size)');
+  }
 
-  const topServices = (aiAnalysis.recommended_services || [])
+  const complaintQuotes = (reviews || [])
+    .filter(r => r.text && r.rating && r.rating <= 3)
+    .slice(0, 4)
+    .map(r => `- (${r.rating}★) "${r.text.slice(0, 220)}"`);
+  const praiseQuotes = (reviews || [])
+    .filter(r => r.text && r.rating && r.rating >= 4)
     .slice(0, 2)
-    .map(s => s.service);
+    .map(r => `- (${r.rating}★) "${r.text.slice(0, 160)}"`);
 
-  const reviewComplaints = reviews
-    .filter(r => r.rating <= 3)
-    .slice(0, 3)
-    .map(r => r.text)
-    .filter(Boolean);
+  const painPoints = (aiAnalysis.pain_points || [])
+    .map(p => (p && (p.issue || p)) || '')
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('; ');
+
+  const services = (aiAnalysis.recommended_services || [])
+    .map(s => (s && (s.service || s)) || '')
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' and ');
 
   const prompt = [
     {
       role: 'system',
-      content: `You are a professional business outreach specialist. Write a cold email that:
-- Is highly personalized based on the business's specific problems
-- References specific review complaints or website issues naturally
-- Proposes a solution without being salesy
-- Is brief (under 120 words)
-- Uses the business owner's first name if available, otherwise use a professional greeting
-- Does NOT include portfolio links
-- Does NOT mention "I am a web developer" or similar
-- Does NOT dump services list
-- Focuses entirely on the business's problem and a solution
-- Ends with a soft call to action (question, not demand)
-- Has a natural, human tone
+      content: `You are ${SENDER_NAME}, an independent web & automation specialist writing a one-to-one cold email to a local business owner.
 
-Return ONLY a JSON object with "subject" and "body" fields. No other text.`,
+Write a HIGHLY PERSONALIZED email that proves you actually researched THIS specific business. Rules:
+- Open by referencing something concrete about the business (its name, what customers say in reviews, or a specific gap on their website).
+- Naturally weave in 1-2 real issues (from reviews or the website findings) — do NOT list them like a report.
+- Propose ONE clear, relevant improvement and the outcome it drives (more booked jobs, fewer missed calls, more reviews).
+- Under 130 words. Warm, human, confident — not salesy, no buzzwords, no "I hope this finds you well".
+- Use the owner's first name if provided, else a natural greeting (e.g. "Hi there,").
+- NO portfolio links, NO pricing, NO bullet lists, NO "I am a web developer" intro.
+- End with a soft question as the call to action.
+- The email body MUST end with EXACTLY these two lines:
+Best regards,
+${SENDER_NAME}
+
+Return ONLY a JSON object: {"subject": "...", "body": "..."} with no other text. The subject must be specific to the business (not generic).`,
     },
     {
       role: 'user',
-      content: `Business: ${business.name}
-Owner: ${business.owner_name || 'Business Owner'}
-Category: ${business.category || 'Local Business'}
+      content: `BUSINESS: ${business.name}
+Owner: ${business.owner_name || '(unknown — use a natural greeting)'}
+Category: ${business.category || 'local business'}
 Location: ${business.address || ''}
-Rating: ${business.rating || 'N/A'}
+Google rating: ${business.rating || 'N/A'} from ${business.reviews_count || 0} reviews
+Website: ${business.website || 'NONE'}
 
-Key Pain Points:
-${topPainPoints.join('\n') || 'General business improvement opportunities'}
+WEBSITE / DIGITAL GAPS:
+${websiteFindings.map(f => '- ' + f).join('\n')}
 
-Customer Complaints from Reviews:
-${reviewComplaints.join('\n') || 'No specific complaints found'}
+WHAT UNHAPPY CUSTOMERS SAY (use these to personalize, paraphrase — don't quote verbatim in full):
+${complaintQuotes.join('\n') || '(no negative reviews available)'}
 
-Recommended Solutions:
-${topServices.join(', ') || 'Business automation and optimization'}
+WHAT HAPPY CUSTOMERS SAY:
+${praiseQuotes.join('\n') || '(none)'}
 
-Email Angle: ${aiAnalysis.email_angle || 'Focus on improving business efficiency'}`,
+AI-IDENTIFIED PAIN POINTS: ${painPoints || 'general growth opportunities'}
+BEST-FIT SOLUTION TO PITCH: ${services || 'a tailored website/automation improvement'}
+KEY ANGLE: ${aiAnalysis.email_angle || 'help them capture and convert more local leads'}`,
     },
   ];
 
   try {
-    const response = await callGroq(prompt, { temperature: 0.8, maxTokens: 1024 });
+    const response = await callGroq(prompt, { temperature: 0.85, maxTokens: 1024 });
     const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const result = JSON.parse(jsonMatch[0]);
-      return {
-        subject: result.subject,
-        body: result.body,
-      };
+    if (!jsonMatch) throw new Error('No valid JSON in response');
+
+    const result = JSON.parse(jsonMatch[0]);
+    if (!result.subject || !result.body) throw new Error('AI response missing subject/body');
+
+    let body = result.body.trim();
+    // Guarantee the required signature.
+    if (!new RegExp(SENDER_NAME, 'i').test(body)) {
+      body = `${body}\n\nBest regards,\n${SENDER_NAME}`;
     }
-    throw new Error('No valid JSON in response');
+
+    return { subject: result.subject.trim(), body };
   } catch (error) {
-    logger.error('Email generation failed:', error.message);
-    return {
-      subject: `Quick idea for ${business.name}`,
-      body: `Hi,\n\nI noticed some opportunities to improve how ${business.name} captures and manages incoming leads online.\n\nWould you be open to hearing a quick idea?\n\nBest regards`,
-    };
+    // No generic fallback: if AI is unavailable (e.g. no Groq key) we do NOT
+    // create a templated email. The caller will skip creating a draft so that
+    // every saved outreach email is genuinely AI-personalized.
+    logger.warn(`Outreach generation skipped — AI unavailable: ${error.message}`);
+    return null;
   }
 }
 

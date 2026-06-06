@@ -72,7 +72,7 @@ const Leads = (() => {
         flex: 1.5,
         cellRenderer: (params) => {
           const name = params.value || 'Unknown';
-          return `<span style="font-weight:600;color:#f1f5f9;cursor:pointer;" onclick="Leads.viewDetail('${params.data.id}')">${Utils.escapeHtml(name)}</span>`;
+          return `<span style="font-weight:600;color:#111827;cursor:pointer;" onclick="Leads.viewDetail('${params.data.id}')">${Utils.escapeHtml(name)}</span>`;
         },
       },
       {

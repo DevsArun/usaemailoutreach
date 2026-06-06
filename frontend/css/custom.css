@@ -1004,19 +1004,15 @@ a:hover { color: var(--primary-dark); }
   color: var(--text-secondary);
   line-height: 1.55;
   margin-bottom: 1rem;
-  max-height: 100px;
-  overflow: hidden;
+  max-height: 280px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
   position: relative;
 }
 
 .email-body-preview::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 30px;
-  background: linear-gradient(transparent, rgba(255, 255, 255, 0.95));
+  content: none;
 }
 
 .email-actions {
