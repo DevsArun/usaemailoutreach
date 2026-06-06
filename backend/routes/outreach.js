@@ -26,7 +26,10 @@ router.get('/', paginationValidation, async (req, res, next) => {
         {
           model: Business,
           as: 'business',
-          attributes: ['id', 'name', 'website', 'lead_score', 'category'],
+          // campaign_id (the FK) MUST be selected so Sequelize can build the
+          // nested Campaign join in the findAndCountAll COUNT query — without
+          // it Postgres errors: column "business.campaign_id" does not exist.
+          attributes: ['id', 'campaign_id', 'name', 'website', 'lead_score', 'category'],
           include: [{
             model: Campaign,
             as: 'campaign',
@@ -37,7 +40,7 @@ router.get('/', paginationValidation, async (req, res, next) => {
         {
           model: Followup,
           as: 'followups',
-          attributes: ['id', 'sequence_number', 'status', 'sent_at'],
+          attributes: ['id', 'outreach_id', 'sequence_number', 'status', 'sent_at'],
         },
       ],
       order: [['created_at', 'DESC']],

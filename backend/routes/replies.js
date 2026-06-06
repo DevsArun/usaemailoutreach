@@ -38,7 +38,7 @@ router.get('/', async (req, res, next) => {
     const include = [{
       model: Business,
       as: 'business',
-      attributes: ['id', 'name', 'website', 'category'],
+      attributes: ['id', 'campaign_id', 'name', 'website', 'category'],
       include: [{
         model: Campaign,
         as: 'campaign',

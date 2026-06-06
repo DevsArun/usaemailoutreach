@@ -23,7 +23,7 @@ from .base import BaseScraper, BusinessData, ReviewData
 class GoogleMapsScraper(BaseScraper):
     source_name = "google_maps"
 
-    MAPS_SEARCH_URL = "https://www.google.com/maps/search/{query}"
+    MAPS_SEARCH_URL = "https://www.google.com/maps/search/{query}?hl=en&gl=us"
 
     # ── public API ──────────────────────────────────────────────────────
     async def scrape_businesses(
@@ -32,6 +32,19 @@ class GoogleMapsScraper(BaseScraper):
         results: list[BusinessData] = []
         context = await self.browser.acquire()
         try:
+            # Pre-set Google's consent cookie to bypass the cookie/consent wall
+            # that datacenter IPs (HF Spaces, Render, etc.) almost always hit —
+            # this is the usual reason "0 business links" are found.
+            try:
+                await context.add_cookies([
+                    {"name": "CONSENT", "value": "YES+cb.20240101-00-p0.en+FX+000",
+                     "domain": ".google.com", "path": "/"},
+                    {"name": "SOCS", "value": "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjQwMTAxLjA0X3AwGgJlbiACGgYIgL...",
+                     "domain": ".google.com", "path": "/"},
+                ])
+            except Exception:
+                pass
+
             page = await self.browser.new_stealth_page(context)
             # Block images / media to speed up navigation.
             await self._block_heavy_resources(page)
@@ -41,9 +54,18 @@ class GoogleMapsScraper(BaseScraper):
                     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
                 except PlaywrightTimeout:
                     self.logger.warning("Initial Maps load timed out, continuing anyway")
-                await page.wait_for_timeout(5_000)
+                await page.wait_for_timeout(4_000)
 
                 await self._dismiss_consent(page)
+
+                # Wait for the results feed / listings to actually appear.
+                try:
+                    await page.wait_for_selector(
+                        'a[href*="/maps/place"], [role="feed"], div[role="article"]',
+                        timeout=20_000,
+                    )
+                except Exception:
+                    self.logger.warning("Results feed did not appear within 20s")
 
                 # Scroll the results feed to load more listings.
                 await self._scroll_results(page, scrolls=8)
@@ -53,6 +75,15 @@ class GoogleMapsScraper(BaseScraper):
                     'a[href*="/maps/place"]',
                     "els => [...new Set(els.map(e => e.href))]",
                 )
+                if not links:
+                    try:
+                        title = await page.title()
+                        self.logger.warning(
+                            "0 place links found. Likely consent wall / block. title='%s' url='%s'",
+                            title, page.url,
+                        )
+                    except Exception:
+                        pass
                 self.logger.info("Found %d business links for '%s'", len(links), query)
 
                 # Time budget so we always return what we have rather than being
