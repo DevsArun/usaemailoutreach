@@ -431,72 +431,91 @@ async function updateProgress(campaign, stage, extra = {}) {
   });
 }
 
+function normalizeReviews(biz) {
+  let reviews = [];
+  if (Array.isArray(biz.reviews)) {
+    reviews = biz.reviews;
+  } else {
+    const raw = biz.reviews || biz['Recent Reviews (Last 20)'] || '';
+    if (raw && typeof raw === 'string' && !/^no reviews/i.test(raw)) {
+      reviews = raw.split('|+|').map(s => ({ text: s.trim() })).filter(r => r.text);
+    }
+  }
+  return reviews.slice(0, 20).map(rev => ({
+    reviewer_name: rev.reviewer_name || 'Anonymous',
+    rating: parseInt(rev.rating) || 0,
+    text: (rev.text || '').toString().slice(0, 5000),
+    review_date: rev.date || '',
+    source: 'google_maps',
+  }));
+}
+
 /**
  * Ingest businesses scraped externally (e.g. a Google Colab Google Maps run)
- * into a campaign. Creates Business + Review records (de-duplicated). The rest
- * of the pipeline (website crawl, email discovery+verification, AI analysis,
- * outreach) then runs normally — none of which is blocked on a datacenter IP.
- * Returns the number of businesses created.
+ * into a campaign. Uses bulk inserts (2 queries instead of hundreds) so large
+ * imports complete in seconds rather than timing out. Returns count created.
  */
 async function importBusinesses(campaignId, businessesData) {
-  let created = 0;
-  let reviewsStored = 0;
+  const seen = new Set();
+  const prepared = []; // { row, reviews, key }
 
   for (const biz of (businessesData || [])) {
     const name = (biz.name || biz['Business Name'] || '').toString().trim();
     if (!name) continue;
-
     const address = (biz.address || biz['Address'] || '').toString().trim();
+    const key = `${name.toLowerCase()}|${address.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-    const existing = await Business.findOne({
-      where: { campaign_id: campaignId, name, address },
+    prepared.push({
+      key,
+      reviews: normalizeReviews(biz),
+      row: {
+        campaign_id: campaignId,
+        name,
+        address,
+        phone: (biz.phone || biz['Phone'] || '').toString().trim(),
+        website: (biz.website || biz['Website'] || '').toString().replace(/^No Website.*/i, '').trim(),
+        rating: parseFloat(biz.rating ?? biz['Rating']) || null,
+        reviews_count: parseInt(biz.reviews_count ?? biz['Total Reviews']) || 0,
+        category: (biz.category || biz['Business Type'] || '').toString().trim(),
+        source: 'google_maps_import',
+      },
     });
-    if (existing) continue;
-
-    const ratingRaw = biz.rating ?? biz['Rating'];
-    const reviewsCountRaw = biz.reviews_count ?? biz['Total Reviews'];
-
-    const business = await Business.create({
-      campaign_id: campaignId,
-      name,
-      address,
-      phone: (biz.phone || biz['Phone'] || '').toString().trim(),
-      website: (biz.website || biz['Website'] || '').toString().replace(/^No Website.*/i, '').trim(),
-      rating: parseFloat(ratingRaw) || null,
-      reviews_count: parseInt(reviewsCountRaw) || 0,
-      category: (biz.category || biz['Business Type'] || '').toString().trim(),
-      source: 'google_maps_import',
-    });
-    created++;
-
-    // Reviews may arrive as an array OR as the Colab CSV's "|+|"-joined string.
-    let reviews = [];
-    if (Array.isArray(biz.reviews)) {
-      reviews = biz.reviews;
-    } else {
-      const raw = biz.reviews || biz['Recent Reviews (Last 20)'] || '';
-      if (raw && typeof raw === 'string' && raw !== 'No Reviews Found' && raw !== 'No Reviews Extracted') {
-        reviews = raw.split('|+|').map(s => ({ text: s.trim() })).filter(r => r.text);
-      }
-    }
-
-    for (const rev of reviews.slice(0, 20)) {
-      try {
-        await Review.create({
-          business_id: business.id,
-          reviewer_name: rev.reviewer_name || 'Anonymous',
-          rating: parseInt(rev.rating) || 0,
-          text: (rev.text || '').toString().slice(0, 5000),
-          review_date: rev.date || '',
-          source: 'google_maps',
-        });
-        reviewsStored++;
-      } catch (e) { /* skip bad review */ }
-    }
   }
 
-  logger.info(`Imported ${created} businesses (${reviewsStored} reviews) into campaign ${campaignId}`);
-  return created;
+  if (prepared.length === 0) return 0;
+
+  // Skip businesses already present in this campaign (single query).
+  const existing = await Business.findAll({
+    where: { campaign_id: campaignId },
+    attributes: ['name', 'address'],
+    raw: true,
+  });
+  const existSet = new Set(existing.map(e => `${(e.name || '').toLowerCase()}|${(e.address || '').toLowerCase()}`));
+  const toCreate = prepared.filter(p => !existSet.has(p.key));
+  if (toCreate.length === 0) return 0;
+
+  // Bulk insert businesses, then bulk insert all their reviews.
+  const createdBusinesses = await Business.bulkCreate(toCreate.map(p => p.row), { returning: true });
+
+  const idByKey = {};
+  createdBusinesses.forEach(b => {
+    idByKey[`${(b.name || '').toLowerCase()}|${(b.address || '').toLowerCase()}`] = b.id;
+  });
+
+  const reviewRows = [];
+  for (const p of toCreate) {
+    const bid = idByKey[p.key];
+    if (!bid) continue;
+    for (const rev of p.reviews) reviewRows.push({ business_id: bid, ...rev });
+  }
+  if (reviewRows.length) {
+    await Review.bulkCreate(reviewRows);
+  }
+
+  logger.info(`Imported ${createdBusinesses.length} businesses (${reviewRows.length} reviews) into campaign ${campaignId}`);
+  return createdBusinesses.length;
 }
 
 module.exports = {

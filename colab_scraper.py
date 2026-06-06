@@ -179,7 +179,7 @@ def push_to_platform(businesses):
         f"{base}/api/campaigns/import",
         json={"query": SEARCH_QUERY, "businesses": businesses},
         headers={"Authorization": f"Bearer {token}"},
-        timeout=120,
+        timeout=300,
     )
     resp.raise_for_status()
     print("✅", resp.json().get("message", "Imported."))
