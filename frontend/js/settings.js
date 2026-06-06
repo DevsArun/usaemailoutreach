@@ -304,7 +304,8 @@ const Settings = (() => {
   async function loadGeneralSettings() {
     try {
       const result = await API.settings.get();
-      const data = result.data || result;
+      // Backend returns { settings: { key: value, ... } } — unwrap it.
+      const data = (result.data && result.data.settings) || result.data || result;
       if (data) {
         const el = (id) => document.getElementById(id);
         if (el('settingProxyEnabled')) el('settingProxyEnabled').checked = data.proxy_enabled || false;

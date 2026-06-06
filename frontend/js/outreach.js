@@ -71,7 +71,7 @@ const Outreach = (() => {
               <div class="email-subject">${Utils.escapeHtml(email.subject || 'No Subject')}</div>
               <div class="email-recipient">
                 To: ${Utils.escapeHtml(email.to_email || email.recipient || 'Unknown')}
-                ${email.business_name ? ` — ${Utils.escapeHtml(email.business_name)}` : ''}
+                ${(email.business_name || (email.business && email.business.name)) ? ` — ${Utils.escapeHtml(email.business_name || email.business.name)}` : ''}
               </div>
             </div>
             <span class="badge badge-${statusColor}" style="text-transform:capitalize;flex-shrink:0;">${email.status || 'draft'}</span>

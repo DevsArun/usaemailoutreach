@@ -39,7 +39,7 @@ const Leads = (() => {
     const highScore = document.getElementById('highScoreLeads');
 
     if (total) total.textContent = leads.length;
-    if (withEmail) withEmail.textContent = leads.filter(l => l.email || l.email_status === 'found').length;
+    if (withEmail) withEmail.textContent = leads.filter(l => (Array.isArray(l.emails) && l.emails.length > 0) || l.email || l.email_status === 'found' || l.email_status === 'valid').length;
     if (avgScore) {
       const scores = leads.filter(l => l.lead_score != null).map(l => l.lead_score);
       avgScore.textContent = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
@@ -80,6 +80,7 @@ const Leads = (() => {
         field: 'location',
         minWidth: 150,
         flex: 1,
+        valueGetter: (params) => params.data.location || params.data.address || '',
         valueFormatter: (params) => params.value || '—',
       },
       {
@@ -130,6 +131,14 @@ const Leads = (() => {
         headerName: 'Email Status',
         field: 'email_status',
         width: 120,
+        valueGetter: (params) => {
+          const emails = params.data.emails;
+          if (Array.isArray(emails) && emails.length) {
+            if (emails.some(e => e.verification_status === 'valid')) return 'valid';
+            return 'found';
+          }
+          return params.data.email_status || 'pending';
+        },
         cellRenderer: (params) => {
           const status = params.value || 'pending';
           const color = Utils.getStatusColor(status);
@@ -269,7 +278,7 @@ const Leads = (() => {
           </div>
           <div style="padding:0.65rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:0.1rem;">Email</div>
-            <div style="font-size:0.82rem;">${lead.email || '—'}</div>
+            <div style="font-size:0.82rem;">${(Array.isArray(lead.emails) && lead.emails.length ? Utils.escapeHtml(lead.emails[0].email) : (lead.email ? Utils.escapeHtml(lead.email) : '—'))}</div>
           </div>
           <div style="padding:0.65rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:0.1rem;">Website</div>

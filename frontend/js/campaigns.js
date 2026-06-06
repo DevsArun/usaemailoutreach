@@ -48,10 +48,10 @@ const Campaigns = (() => {
 
     container.innerHTML = list.map(c => {
       const statusColor = Utils.getStatusColor(c.status);
-      const progress = c.progress || 0;
+      const progress = Utils.campaignProgress(c);
       const createdAt = Utils.formatDate(c.created_at);
-      const leadsCount = c.leads_count || c.businesses_count || 0;
-      const emailsSent = c.emails_sent || 0;
+      const leadsCount = Utils.campaignLeads(c);
+      const emailsSent = Utils.campaignEmailsSent(c);
 
       return `
         <div class="glass-card p-5 animate-fade-in-up" data-campaign-id="${c.id}">
@@ -309,11 +309,11 @@ const Campaigns = (() => {
           </div>
           <div style="padding:0.75rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.15rem;">Leads Found</div>
-            <div style="font-size:0.85rem;font-weight:600;">${campaign.leads_count || campaign.businesses_count || 0}</div>
+            <div style="font-size:0.85rem;font-weight:600;">${Utils.campaignLeads(campaign)}</div>
           </div>
           <div style="padding:0.75rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.15rem;">Emails Sent</div>
-            <div style="font-size:0.85rem;font-weight:600;">${campaign.emails_sent || 0}</div>
+            <div style="font-size:0.85rem;font-weight:600;">${Utils.campaignEmailsSent(campaign)}</div>
           </div>
           <div style="padding:0.75rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.15rem;">Reply Rate</div>

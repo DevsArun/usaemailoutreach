@@ -21,7 +21,18 @@ const Replies = (() => {
     try {
       const result = await API.replies.list();
       const data = result.data || result;
-      replies = data.replies || (Array.isArray(data) ? data : []);
+      const raw = data.replies || (Array.isArray(data) ? data : []);
+      // Normalize backend OutreachEmail fields → the shape this UI expects.
+      replies = raw.map(r => ({
+        ...r,
+        sender: r.sender || (r.business && r.business.name) || r.to_email || 'Unknown',
+        from_email: r.from_email || r.to_email || '',
+        classification: r.classification || r.reply_classification || 'unclassified',
+        body: r.body || r.content || r.reply_text || '',
+        received_at: r.received_at || r.replied_at || r.created_at,
+        responded: r.responded ?? (Array.isArray(r.followups) && r.followups.length > 0),
+        read: r.read ?? false,
+      }));
       renderList(replies);
       updateStats(replies);
     } catch {

@@ -47,6 +47,9 @@ router.get('/overview', async (req, res, next) => {
       meetingsBooked,
       dealsWon,
       activeCampaigns,
+      pendingEmails,
+      unreadReplies,
+      pipelineDeals,
     ] = await Promise.all([
       Business.count({ where: { campaign_id: { [Op.in]: campaignIds } } }),
       Email.count({
@@ -62,10 +65,14 @@ router.get('/overview', async (req, res, next) => {
       Business.count({ where: { campaign_id: { [Op.in]: campaignIds }, pipeline_stage: 'meeting_scheduled' } }),
       Business.count({ where: { campaign_id: { [Op.in]: campaignIds }, pipeline_stage: 'won' } }),
       Campaign.count({ where: { user_id: req.user.id, status: 'running' } }),
+      OutreachEmail.count({ where: { campaign_id: { [Op.in]: campaignIds }, status: 'draft' } }),
+      OutreachEmail.count({ where: { campaign_id: { [Op.in]: campaignIds }, status: 'replied' } }),
+      Business.count({ where: { campaign_id: { [Op.in]: campaignIds }, pipeline_stage: { [Op.in]: ['interested', 'meeting_scheduled', 'proposal_sent', 'won'] } } }),
     ]);
 
     const openRate = totalEmailsSent > 0 ? ((totalOpened / totalEmailsSent) * 100).toFixed(1) : 0;
     const replyRate = totalEmailsSent > 0 ? ((totalReplied / totalEmailsSent) * 100).toFixed(1) : 0;
+    const conversionRate = totalEmailsSent > 0 ? ((dealsWon / totalEmailsSent) * 100).toFixed(1) : 0;
 
     res.json({
       success: true,
@@ -79,9 +86,13 @@ router.get('/overview', async (req, res, next) => {
         totalReplied,
         openRate: parseFloat(openRate),
         replyRate: parseFloat(replyRate),
+        conversionRate: parseFloat(conversionRate),
         meetingsBooked,
         dealsWon,
         activeCampaigns,
+        pendingEmails,
+        unreadReplies,
+        pipelineDeals,
         revenuePotential: dealsWon > 0 ? `$${(dealsWon * 2500).toLocaleString()}+` : 'Calculating...',
       },
     });
@@ -113,6 +124,7 @@ router.get('/', async (req, res, next) => {
           leadSourceDistribution: [],
           pipelineFunnel: [],
           topPerformingCampaigns: [],
+          scoreDistribution: { labels: ['0-20', '20-40', '40-60', '60-80', '80-100'], values: [0, 0, 0, 0, 0] },
         },
       });
     }
@@ -166,6 +178,20 @@ router.get('/', async (req, res, next) => {
       limit: 10,
     });
 
+    // Lead-score distribution — bucketed in JS (no fragile raw SQL).
+    const scoreRows = await Business.findAll({
+      where: { campaign_id: { [Op.in]: campaignIds } },
+      attributes: ['lead_score'],
+      raw: true,
+    });
+    const scoreLabels = ['0-20', '20-40', '40-60', '60-80', '80-100'];
+    const scoreValues = [0, 0, 0, 0, 0];
+    scoreRows.forEach(r => {
+      const s = parseInt(r.lead_score) || 0;
+      const idx = s >= 80 ? 4 : s >= 60 ? 3 : s >= 40 ? 2 : s >= 20 ? 1 : 0;
+      scoreValues[idx]++;
+    });
+
     res.json({
       success: true,
       data: {
@@ -173,6 +199,7 @@ router.get('/', async (req, res, next) => {
         leadSourceDistribution,
         pipelineFunnel,
         topPerformingCampaigns: topCampaigns,
+        scoreDistribution: { labels: scoreLabels, values: scoreValues },
       },
     });
   } catch (error) {

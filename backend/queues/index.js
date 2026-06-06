@@ -46,8 +46,17 @@ async function initQueues() {
     return;
   }
 
+  let connection = null;
   try {
-    const connection = createRedisConnection();
+    connection = createRedisConnection();
+
+    // IMPORTANT: keep a permanent 'error' listener attached at all times.
+    // ioredis is an EventEmitter — an 'error' event with no listener would
+    // crash the whole process. Since we keep retrying in the background,
+    // errors can fire repeatedly, so this noop guard must persist.
+    connection.on('error', (err) => {
+      logger.debug(`Redis error: ${err.message}`);
+    });
 
     // Verify the connection is actually usable before committing to it.
     await new Promise((resolve, reject) => {
@@ -71,6 +80,10 @@ async function initQueues() {
     logger.info('BullMQ queues initialised (Redis connected).');
   } catch (err) {
     useRedis = false;
+    // Stop the failed connection from retrying forever in the background.
+    if (connection) {
+      try { connection.disconnect(); } catch (e) { /* ignore */ }
+    }
     logger.warn(`Redis unavailable (${err.message}). Falling back to in-process job execution.`);
   }
 }

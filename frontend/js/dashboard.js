@@ -77,7 +77,7 @@ const Dashboard = (() => {
         icon: '🚀',
         iconBg: 'rgba(5,150,105,0.1)',
         label: 'Active Campaigns',
-        value: data.totalCampaigns || data.active_campaigns || 0,
+        value: data.activeCampaigns ?? data.active_campaigns ?? 0,
         change: data.campaigns_change || 0,
         up: (data.campaigns_change || 0) >= 0,
       },
@@ -85,7 +85,7 @@ const Dashboard = (() => {
         icon: '✉️',
         iconBg: 'rgba(59,130,246,0.1)',
         label: 'Emails Sent',
-        value: data.totalEmails || data.emails_sent || 0,
+        value: data.totalEmailsSent ?? data.totalEmails ?? data.emails_sent ?? 0,
         change: data.emails_change || 0,
         up: (data.emails_change || 0) >= 0,
       },
@@ -93,7 +93,7 @@ const Dashboard = (() => {
         icon: '💬',
         iconBg: 'rgba(245,158,11,0.1)',
         label: 'Reply Rate',
-        value: data.reply_rate || 0,
+        value: data.replyRate ?? data.reply_rate ?? 0,
         change: data.reply_change || 0,
         up: (data.reply_change || 0) >= 0,
         suffix: '%',
@@ -141,7 +141,9 @@ const Dashboard = (() => {
       }
 
       feed.innerHTML = activities.map((a) => {
-        const type = a.classification || 'reply';
+        const type = a.classification || a.reply_classification || 'reply';
+        const sender = a.sender || (a.business && a.business.name) || a.from_email || a.to_email || 'Someone';
+        const when = a.received_at || a.replied_at || a.created_at;
         const colors = {
           interested: 'rgba(22,163,74,0.1)',
           positive: 'rgba(22,163,74,0.1)',
@@ -162,9 +164,9 @@ const Dashboard = (() => {
             </div>
             <div>
               <div class="activity-text">
-                <strong>${Utils.escapeHtml(a.sender || a.from_email || 'Someone')}</strong> replied to your outreach
+                <strong>${Utils.escapeHtml(sender)}</strong> replied to your outreach
               </div>
-              <div class="activity-time">${Utils.timeAgo(a.received_at || a.created_at)}</div>
+              <div class="activity-time">${Utils.timeAgo(when)}</div>
             </div>
           </div>
         `;
@@ -223,7 +225,7 @@ const Dashboard = (() => {
 
       container.innerHTML = list.slice(0, 5).map(c => {
         const statusColor = Utils.getStatusColor(c.status);
-        const progress = c.progress || 0;
+        const progress = Utils.campaignProgress(c);
         return `
           <div style="display:flex;align-items:center;gap:1rem;padding:0.75rem 0;border-bottom:1px solid #f3f4f6;">
             <div style="flex:1;min-width:0;">
@@ -232,7 +234,7 @@ const Dashboard = (() => {
               </div>
               <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span class="badge badge-${statusColor}">${c.status || 'draft'}</span>
-                <span style="font-size:0.7rem;color:var(--text-muted);">${c.leads_count || 0} leads</span>
+                <span style="font-size:0.7rem;color:var(--text-muted);">${Utils.campaignLeads(c)} leads</span>
               </div>
             </div>
             <div style="width:100px;">

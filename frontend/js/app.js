@@ -327,6 +327,36 @@ const Utils = {
     return 'danger';
   },
 
+  // Campaign progress is stored as a JSONB object on the backend
+  // ({ current_stage, businesses_found, current, total, ... }), not a
+  // single number. Derive a sensible 0-100 percentage for the UI.
+  campaignProgress(c) {
+    const p = c && c.progress;
+    if (typeof p === 'number') return Math.min(100, Math.max(0, Math.round(p)));
+    if (!p || typeof p !== 'object') return c && c.status === 'completed' ? 100 : 0;
+    if (c.status === 'completed') return 100;
+    if (c.status === 'pending') return 0;
+    if (p.current && p.total) return Math.min(99, Math.round((p.current / p.total) * 100));
+    const stageMap = {
+      idle: 0, scraping: 5, collecting_reviews: 20, crawling_websites: 35,
+      finding_emails: 50, analyzing: 65, verifying_emails: 78,
+      generating_outreach: 90, completed: 100, failed: 0,
+    };
+    const st = p.current_stage;
+    if (st && Object.prototype.hasOwnProperty.call(stageMap, st)) return stageMap[st];
+    return c.status === 'running' ? 10 : 0;
+  },
+
+  campaignLeads(c) {
+    return (c && c.progress && typeof c.progress === 'object' && c.progress.businesses_found)
+      || (c && c.leads_count) || (c && c.businesses_count) || 0;
+  },
+
+  campaignEmailsSent(c) {
+    return (c && c.progress && typeof c.progress === 'object' && c.progress.emails_sent)
+      || (c && c.emails_sent) || 0;
+  },
+
   renderStars(rating, max = 5) {
     let html = '<span class="stars">';
     for (let i = 1; i <= max; i++) {

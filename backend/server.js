@@ -136,6 +136,20 @@ async function connectServices() {
           if (resetCount > 0) logger.info(`Reset ${resetCount} stuck campaigns to 'failed'`);
         } catch(e) { logger.warn('Could not reset stuck campaigns:', e.message); }
 
+        // Load user-added Groq API keys from the database into the rotation
+        // manager (it only auto-loads ENV keys at boot, so DB keys would
+        // otherwise be lost after every restart and break all AI features).
+        try {
+          const { GroqKey } = require('./models');
+          const { groqKeyManager } = require('./config/groq');
+          const dbKeys = await GroqKey.findAll({ where: { status: 'active' } });
+          let loaded = 0;
+          dbKeys.forEach(k => {
+            if (k.api_key && k.api_key.startsWith('gsk_')) { groqKeyManager.addKey(k.api_key); loaded++; }
+          });
+          if (loaded > 0) logger.info(`Loaded ${loaded} Groq key(s) from database`);
+        } catch(e) { logger.warn('Could not load Groq keys from DB:', e.message); }
+
         break;
       } catch (err) {
         logger.error(`❌ DB attempt ${attempt}/30: ${err.message}`);
