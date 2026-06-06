@@ -50,36 +50,41 @@ class GoogleMapsScraper(BaseScraper):
             await self._block_heavy_resources(page)
             try:
                 url = self.MAPS_SEARCH_URL.format(query=quote(query))
-                try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                except PlaywrightTimeout:
-                    self.logger.warning("Initial Maps load timed out, continuing anyway")
-                await page.wait_for_timeout(4_000)
+                links = []
+                for attempt in range(2):
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                    except PlaywrightTimeout:
+                        self.logger.warning("Maps load timed out (attempt %d)", attempt + 1)
+                    await page.wait_for_timeout(5_000)
+                    await self._dismiss_consent(page)
 
-                await self._dismiss_consent(page)
+                    # Wait for the results feed / listings to actually appear.
+                    try:
+                        await page.wait_for_selector(
+                            'a[href*="/maps/place"], [role="feed"], div[role="article"]',
+                            timeout=20_000,
+                        )
+                    except Exception:
+                        self.logger.warning("Results feed did not appear within 20s (attempt %d)", attempt + 1)
 
-                # Wait for the results feed / listings to actually appear.
-                try:
-                    await page.wait_for_selector(
-                        'a[href*="/maps/place"], [role="feed"], div[role="article"]',
-                        timeout=20_000,
+                    await self._scroll_results(page, scrolls=8)
+
+                    links = await page.eval_on_selector_all(
+                        'a[href*="/maps/place"]',
+                        "els => [...new Set(els.map(e => e.href))]",
                     )
-                except Exception:
-                    self.logger.warning("Results feed did not appear within 20s")
+                    if links:
+                        break
+                    self.logger.warning("No links on attempt %d; reloading...", attempt + 1)
+                    await page.wait_for_timeout(3_000)
 
-                # Scroll the results feed to load more listings.
-                await self._scroll_results(page, scrolls=8)
-
-                # Collect unique place links.
-                links = await page.eval_on_selector_all(
-                    'a[href*="/maps/place"]',
-                    "els => [...new Set(els.map(e => e.href))]",
-                )
                 if not links:
                     try:
                         title = await page.title()
                         self.logger.warning(
-                            "0 place links found. Likely consent wall / block. title='%s' url='%s'",
+                            "0 place links found. Likely datacenter-IP soft-block. "
+                            "title='%s' url='%s' — consider setting PROXY_URLS (residential proxy).",
                             title, page.url,
                         )
                     except Exception:

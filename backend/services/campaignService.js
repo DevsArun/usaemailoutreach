@@ -89,8 +89,18 @@ async function processCampaign(campaignId, userId) {
 
 async function discoverBusinesses(campaign) {
   try {
+    // Build a location-aware query. Google Maps returns a proper results feed
+    // only when a location is present (e.g. "Plumber in New York"); a bare
+    // keyword often yields no list. Append the configured location if the
+    // user didn't already include one in the query.
+    let searchQuery = (campaign.query || '').trim();
+    const loc = (campaign.location || (campaign.settings && campaign.settings.location) || '').trim();
+    if (loc && loc.toLowerCase() !== 'united states' && !/\s+in\s+/i.test(searchQuery)) {
+      searchQuery = `${searchQuery} in ${loc}`;
+    }
+
     const response = await axios.post(`${SCRAPER_URL}/scrape/businesses`, {
-      query: campaign.query,
+      query: searchQuery,
       // Google Maps is the single discovery source; business websites are then
       // crawled for emails. (Other directories are intentionally not used.)
       sources: ['google_maps'],
