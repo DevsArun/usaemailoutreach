@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leads — LeadForge AI</title>
+  <meta name="description" content="Explore and manage your discovered business leads with advanced filtering and scoring.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+  <!-- AG Grid -->
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@35.3.1/dist/ag-grid-community.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebarContainer"></div>
+
+    <main class="main-content" id="mainContent">
+      <!-- Header -->
+      <div class="top-header">
+        <div class="page-title-section">
+          <h1>Lead Explorer</h1>
+          <p>Browse, filter, and manage all discovered business leads.</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export CSV</button>
+          <button class="btn btn-primary btn-sm" onclick="Leads.loadLeads()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <!-- Stats Bar -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Total Leads</div>
+          <div style="font-size:1.25rem;font-weight:800;" id="totalLeads">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">With Email</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--success);" id="leadsWithEmail">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Avg Score</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--primary-light);" id="avgLeadScore">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">High Score (80+)</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--warning);" id="highScoreLeads">0</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="glass-card-static p-4 mb-5">
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+          <div class="search-bar" style="flex:1;min-width:200px;max-width:400px;">
+            <span class="search-icon">🔍</span>
+            <input type="text" placeholder="Search leads by name, location..." id="leadSearch">
+          </div>
+          <select class="form-select" id="leadCampaignFilter" style="width:200px;padding:0.5rem 2rem 0.5rem 0.75rem;">
+            <option value="">All Campaigns</option>
+          </select>
+
+          <!-- Bulk Actions (hidden by default) -->
+          <div id="bulkActions" style="display:none;align-items:center;gap:0.5rem;margin-left:auto;">
+            <span style="font-size:0.78rem;color:var(--text-muted);"><span id="selectedCount">0</span> selected</span>
+            <button class="btn btn-primary btn-sm" onclick="alert('Batch email feature — select leads and send outreach')">✉️ Send Email</button>
+            <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AG Grid -->
+      <div class="glass-card-static" style="overflow:hidden;">
+        <div id="leadsGrid" class="ag-theme-custom" style="width:100%;min-height:400px;"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Lead Detail Modal -->
+  <div class="modal-overlay" id="leadDetailModal">
+    <div class="modal" style="max-width:580px;">
+      <div class="modal-header">
+        <h3>Lead Details</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="leadDetailBody">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/leads.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
+      App.init();
+      Leads.init();
+    });
+  </script>
+</body>
+</html>

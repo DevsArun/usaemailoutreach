@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — LeadForge AI</title>
+  <meta name="description" content="Configure SMTP accounts, API keys, proxy settings, and service catalog for LeadForge AI.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebarContainer"></div>
+
+    <main class="main-content" id="mainContent">
+      <!-- Header -->
+      <div class="top-header">
+        <div class="page-title-section">
+          <h1>Settings</h1>
+          <p>Configure your account, integrations, and preferences.</p>
+        </div>
+      </div>
+
+      <!-- Settings Tabs -->
+      <div class="tabs" id="settingsTabs">
+        <button class="tab active" data-panel="panelSmtp">📧 SMTP Accounts</button>
+        <button class="tab" data-panel="panelGroq">🔑 AI Keys</button>
+        <button class="tab" data-panel="panelServices">⚙️ Services</button>
+        <button class="tab" data-panel="panelGeneral">🛠 General</button>
+      </div>
+
+      <!-- ============ SMTP Panel ============ -->
+      <div class="settings-panel" id="panelSmtp">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+          <div>
+            <h2 style="font-size:1.05rem;font-weight:700;">SMTP Accounts</h2>
+            <p style="font-size:0.78rem;color:var(--text-muted);">Configure email sending accounts for outreach.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="Settings.openAddSmtp()">+ Add Account</button>
+        </div>
+        <div id="smtpList">
+          <div class="skeleton skeleton-card" style="height:80px;margin-bottom:0.75rem;"></div>
+        </div>
+      </div>
+
+      <!-- ============ Groq Panel ============ -->
+      <div class="settings-panel" id="panelGroq" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
+          <div>
+            <h2 style="font-size:1.05rem;font-weight:700;">Groq API Keys</h2>
+            <p style="font-size:0.78rem;color:var(--text-muted);">Manage API keys for AI-powered email generation and analysis.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="Modal.open('groqModal')">+ Add Key</button>
+        </div>
+        <div id="groqKeysList">
+          <div class="skeleton skeleton-card" style="height:80px;margin-bottom:0.75rem;"></div>
+        </div>
+
+        <div class="glass-card-static p-5 mt-6">
+          <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:0.5rem;">ℹ️ About Groq API</h3>
+          <p style="font-size:0.8rem;color:var(--text-secondary);line-height:1.6;">
+            Groq provides ultra-fast AI inference for generating personalized outreach emails, analyzing lead data, and classifying replies.
+            Get your API key from <a href="https://console.groq.com" target="_blank" style="color:var(--primary-light);">console.groq.com</a>.
+          </p>
+        </div>
+      </div>
+
+      <!-- ============ Services Panel ============ -->
+      <div class="settings-panel" id="panelServices" style="display:none;">
+        <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:0.25rem;">Services Catalog</h2>
+        <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1.25rem;">Enable or disable individual platform services.</p>
+
+        <div class="space-y-4">
+          <div class="glass-card-static p-4">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:0.85rem;">
+                <div style="width:42px;height:42px;background:rgba(22,163,74,0.1);border-radius:0.75rem;display:flex;align-items:center;justify-content:center;font-size:1.1rem;">🗺️</div>
+                <div>
+                  <div style="font-size:0.85rem;font-weight:600;">Google Maps Scraper</div>
+                  <div style="font-size:0.72rem;color:var(--text-muted);">Discover businesses from Google Maps search results</div>
+                </div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="serviceGoogleMaps" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="glass-card-static p-4">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:0.85rem;">
+                <div style="width:42px;height:42px;background:rgba(5,150,105,0.1);border-radius:0.75rem;display:flex;align-items:center;justify-content:center;font-size:1.1rem;">🌐</div>
+                <div>
+                  <div style="font-size:0.85rem;font-weight:600;">Website Scraper</div>
+                  <div style="font-size:0.72rem;color:var(--text-muted);">Extract contact info and details from business websites</div>
+                </div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="serviceWebScraper" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="glass-card-static p-4">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:0.85rem;">
+                <div style="width:42px;height:42px;background:rgba(59,130,246,0.1);border-radius:0.75rem;display:flex;align-items:center;justify-content:center;font-size:1.1rem;">📧</div>
+                <div>
+                  <div style="font-size:0.85rem;font-weight:600;">Email Finder</div>
+                  <div style="font-size:0.72rem;color:var(--text-muted);">Find and verify business email addresses</div>
+                </div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="serviceEmailFinder" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="glass-card-static p-4">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:0.85rem;">
+                <div style="width:42px;height:42px;background:rgba(245,158,11,0.1);border-radius:0.75rem;display:flex;align-items:center;justify-content:center;font-size:1.1rem;">🤖</div>
+                <div>
+                  <div style="font-size:0.85rem;font-weight:600;">AI Email Writer</div>
+                  <div style="font-size:0.72rem;color:var(--text-muted);">Generate personalized outreach emails using AI</div>
+                </div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="serviceAIWriter" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ General Panel ============ -->
+      <div class="settings-panel" id="panelGeneral" style="display:none;">
+        <h2 style="font-size:1.05rem;font-weight:700;margin-bottom:0.25rem;">General Settings</h2>
+        <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1.25rem;">Configure email limits, proxy, and general preferences.</p>
+
+        <form id="generalSettingsForm">
+          <div class="glass-card-static p-5 mb-5">
+            <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:1rem;">📨 Email Configuration</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="form-group">
+                <label class="form-label" for="settingDailyLimit">Daily Email Limit</label>
+                <input type="number" id="settingDailyLimit" class="form-input" value="50" min="1" max="1000">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="settingDelay">Delay Between Emails (seconds)</label>
+                <input type="number" id="settingDelay" class="form-input" value="30" min="5" max="300">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;">
+              <label class="toggle">
+                <input type="checkbox" id="settingFollowUp">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-size:0.82rem;font-weight:600;">Auto Follow-up</div>
+                <div style="font-size:0.7rem;color:var(--text-muted);">Automatically send follow-up emails after no reply</div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:0.75rem;max-width:200px;">
+              <label class="form-label" for="settingFollowUpDays">Follow-up After (days)</label>
+              <input type="number" id="settingFollowUpDays" class="form-input" value="3" min="1" max="30">
+            </div>
+          </div>
+
+          <div class="glass-card-static p-5 mb-5">
+            <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:1rem;">🌐 Proxy Settings</h3>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+              <label class="toggle">
+                <input type="checkbox" id="settingProxyEnabled">
+                <span class="toggle-slider"></span>
+              </label>
+              <div>
+                <div style="font-size:0.82rem;font-weight:600;">Enable Proxy</div>
+                <div style="font-size:0.7rem;color:var(--text-muted);">Route scraping requests through a proxy server</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="settingProxyUrl">Proxy URL</label>
+              <input type="text" id="settingProxyUrl" class="form-input" placeholder="http://user:pass@proxy.example.com:8080">
+            </div>
+          </div>
+
+          <div class="glass-card-static p-5 mb-5">
+            <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:1rem;">🕐 Timezone</h3>
+            <div class="form-group" style="max-width:300px;">
+              <label class="form-label" for="settingTimezone">Timezone</label>
+              <select id="settingTimezone" class="form-select">
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">Eastern Time (ET)</option>
+                <option value="America/Chicago">Central Time (CT)</option>
+                <option value="America/Denver">Mountain Time (MT)</option>
+                <option value="America/Los_Angeles">Pacific Time (PT)</option>
+                <option value="Europe/London">London (GMT)</option>
+                <option value="Europe/Paris">Paris (CET)</option>
+                <option value="Asia/Tokyo">Tokyo (JST)</option>
+                <option value="Asia/Kolkata">India (IST)</option>
+                <option value="Australia/Sydney">Sydney (AEST)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- SMTP Modal -->
+  <div class="modal-overlay" id="smtpModal">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 id="smtpModalTitle">📧 Add SMTP Account</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <form id="smtpForm">
+        <input type="hidden" id="smtpEditId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="smtpProvider">Provider *</label>
+            <select id="smtpProvider" class="form-select" required>
+              <option value="gmail">Gmail</option>
+              <option value="outlook">Outlook / Hotmail</option>
+              <option value="custom">Custom SMTP</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="smtpEmail">Email Address *</label>
+            <input type="email" id="smtpEmail" class="form-input" placeholder="your-email@gmail.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="smtpPassword">App Password *</label>
+            <input type="password" id="smtpPassword" class="form-input" placeholder="App password (not your login password)" required>
+          </div>
+          <div id="smtpCustomFields" style="display:none;">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="form-group">
+                <label class="form-label" for="smtpHost">SMTP Host</label>
+                <input type="text" id="smtpHost" class="form-input" placeholder="smtp.example.com">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="smtpPort">Port</label>
+                <input type="number" id="smtpPort" class="form-input" value="587" min="1" max="65535">
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="smtpDailyLimit">Daily Send Limit</label>
+            <input type="number" id="smtpDailyLimit" class="form-input" value="500" min="1" max="10000">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="Modal.close('smtpModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">💾 Save Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Groq Key Modal -->
+  <div class="modal-overlay" id="groqModal">
+    <div class="modal" style="max-width:460px;">
+      <div class="modal-header">
+        <h3>🔑 Add Groq API Key</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <form id="groqForm">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="groqKeyName">Key Name</label>
+            <input type="text" id="groqKeyName" class="form-input" placeholder="e.g. Production Key">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="groqKeyValue">API Key *</label>
+            <input type="password" id="groqKeyValue" class="form-input" placeholder="gsk_..." required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="Modal.close('groqModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">🔑 Add Key</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/settings.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
+      App.init();
+      Settings.init();
+
+      // Toggle custom SMTP fields based on provider selection
+      const providerSelect = document.getElementById('smtpProvider');
+      if (providerSelect) {
+        providerSelect.addEventListener('change', () => {
+          const customFields = document.getElementById('smtpCustomFields');
+          if (customFields) {
+            customFields.style.display = providerSelect.value === 'custom' ? 'block' : 'none';
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeadForge AI — Sign In</title>
+  <meta name="description" content="LeadForge AI - AI-Powered Business Intelligence & Outreach Platform. Sign in to your account.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card animate-fade-in-up">
+      <!-- Logo -->
+      <div class="auth-logo">
+        <div class="logo-icon">⚡</div>
+        <h1>LeadForge AI</h1>
+        <p>AI-Powered Business Intelligence & Outreach</p>
+      </div>
+
+      <!-- Auth Error -->
+      <div id="authError" style="display:none; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); color:#dc2626; padding:0.65rem 1rem; border-radius:0.75rem; font-size:0.82rem; margin-bottom:1rem; text-align:center;"></div>
+
+      <!-- Tabs -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="loginTab">Sign In</button>
+        <button class="auth-tab" id="registerTab">Create Account</button>
+      </div>
+
+      <!-- Login Form -->
+      <form id="loginForm">
+        <div class="form-group">
+          <label class="form-label" for="loginEmail">Email Address</label>
+          <div class="input-group">
+            <span class="input-icon">✉</span>
+            <input type="email" id="loginEmail" class="form-input" placeholder="you@company.com" required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginPassword">Password</label>
+          <div class="input-group">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="loginPassword" class="form-input" placeholder="Enter your password" required autocomplete="current-password">
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.78rem;color:#4b5563;cursor:pointer;">
+            <input type="checkbox" style="accent-color:#16a34a;">
+            Remember me
+          </label>
+          <a href="#" style="font-size:0.78rem;color:#16a34a;">Forgot password?</a>
+        </div>
+        <button type="submit" id="loginBtn" class="btn btn-primary" style="width:100%;padding:0.7rem;">
+          Sign In
+        </button>
+      </form>
+
+      <!-- Register Form -->
+      <form id="registerForm" style="display:none;">
+        <div class="form-group">
+          <label class="form-label" for="registerName">Full Name</label>
+          <div class="input-group">
+            <span class="input-icon">👤</span>
+            <input type="text" id="registerName" class="form-input" placeholder="John Doe" required autocomplete="name">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="registerEmail">Email Address</label>
+          <div class="input-group">
+            <span class="input-icon">✉</span>
+            <input type="email" id="registerEmail" class="form-input" placeholder="you@company.com" required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="registerPassword">Password</label>
+          <div class="input-group">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="registerPassword" class="form-input" placeholder="Min. 8 characters" required minlength="8" autocomplete="new-password">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="registerConfirmPassword">Confirm Password</label>
+          <div class="input-group">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="registerConfirmPassword" class="form-input" placeholder="Confirm your password" required minlength="8" autocomplete="new-password">
+          </div>
+        </div>
+        <button type="submit" id="registerBtn" class="btn btn-primary" style="width:100%;padding:0.7rem;margin-top:0.5rem;">
+          Create Account
+        </button>
+      </form>
+
+      <!-- Footer -->
+      <p style="text-align:center;font-size:0.72rem;color:#9ca3af;margin-top:1.5rem;">
+        By signing in, you agree to our Terms of Service and Privacy Policy.
+      </p>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Auth.initAuthPage();
+    });
+  </script>
+</body>
+</html>

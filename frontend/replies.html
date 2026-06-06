@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Replies — LeadForge AI</title>
+  <meta name="description" content="Unified inbox for lead replies with AI-powered classification and quick reply.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebarContainer"></div>
+
+    <main class="main-content" id="mainContent">
+      <!-- Header -->
+      <div class="top-header">
+        <div class="page-title-section">
+          <h1>Reply Inbox</h1>
+          <p>AI-classified replies from your outreach campaigns.</p>
+        </div>
+        <div class="header-actions">
+          <div class="search-bar">
+            <span class="search-icon">🔍</span>
+            <input type="text" placeholder="Search replies..." id="replySearch">
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="Replies.loadReplies()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Total Replies</div>
+          <div style="font-size:1.25rem;font-weight:800;" id="totalReplies">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Unread</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--primary-light);" id="unreadCount">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Interested</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--success);" id="interestedCount">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Needs Action</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--warning);" id="needsActionCount">0</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="replyTabs">
+        <button class="tab active" data-filter="all">All</button>
+        <button class="tab" data-filter="unread">Unread</button>
+        <button class="tab" data-filter="interested">Interested</button>
+        <button class="tab" data-filter="not_interested">Not Interested</button>
+        <button class="tab" data-filter="question">Questions</button>
+      </div>
+
+      <!-- Split Layout -->
+      <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:1rem;min-height:500px;">
+        <!-- Reply List -->
+        <div class="glass-card-static" style="overflow-y:auto;max-height:calc(100vh - 320px);">
+          <div id="repliesList">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Reply Detail -->
+        <div class="glass-card-static" id="replyDetail" style="display:none;overflow-y:auto;max-height:calc(100vh - 320px);">
+          <!-- Populated by JS when a reply is selected -->
+        </div>
+
+        <!-- Empty Detail State -->
+        <div class="glass-card-static" id="replyDetailEmpty" style="display:flex;align-items:center;justify-content:center;">
+          <div class="empty-state">
+            <div class="empty-state-icon">💬</div>
+            <h3>Select a reply</h3>
+            <p>Click on a reply from the list to view the full conversation and respond.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/replies.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
+      App.init();
+      Replies.init();
+    });
+
+    // Override selectReply to manage detail panel visibility
+    const _originalSelectReply = Replies.selectReply;
+    Replies.selectReply = function(id) {
+      _originalSelectReply(id);
+      const detail = document.getElementById('replyDetail');
+      const empty = document.getElementById('replyDetailEmpty');
+      if (detail) detail.style.display = 'block';
+      if (empty) empty.style.display = 'none';
+    };
+  </script>
+</body>
+</html>

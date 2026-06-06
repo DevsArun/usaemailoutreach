@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: leadforge_db
+      POSTGRES_USER: leadforge
+      POSTGRES_PASSWORD: leadforge_secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadforge -d leadforge_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    networks:
+      - leadforge-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"
+    networks:
+      - leadforge-net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 7860
+      DATABASE_URL: postgres://leadforge:leadforge_secret@db:5432/leadforge_db
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-a-strong-secret-key}
+      JWT_EXPIRES_IN: 7d
+      SCRAPER_SERVICE_URL: http://localhost:8000
+      GROQ_API_KEY_1: ${GROQ_API_KEY_1:-}
+      GROQ_API_KEY_2: ${GROQ_API_KEY_2:-}
+      GROQ_API_KEY_3: ${GROQ_API_KEY_3:-}
+      GROQ_API_KEY_4: ${GROQ_API_KEY_4:-}
+      GROQ_API_KEY_5: ${GROQ_API_KEY_5:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      LOG_LEVEL: info
+      DEFAULT_DAILY_EMAIL_LIMIT: 50
+      MAX_FOLLOWUPS: 3
+    volumes:
+      - app_logs:/app/logs
+      - app_data:/app/data
+    networks:
+      - leadforge-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_logs:
+  app_data:
+
+networks:
+  leadforge-net:
+    driver: bridge

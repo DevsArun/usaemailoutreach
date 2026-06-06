@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipeline — LeadForge AI</title>
+  <meta name="description" content="Visual Kanban pipeline to track leads through 10 stages from discovery to closing.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebarContainer"></div>
+
+    <main class="main-content" id="mainContent">
+      <!-- Header -->
+      <div class="top-header">
+        <div class="page-title-section">
+          <h1>Pipeline</h1>
+          <p>Track your leads through the sales pipeline.</p>
+        </div>
+        <div class="header-actions">
+          <select class="form-select" id="pipelineCampaignFilter" style="width:200px;padding:0.5rem 2rem 0.5rem 0.75rem;">
+            <option value="">All Campaigns</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="Pipeline.loadPipeline()">🔄 Refresh</button>
+        </div>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Total in Pipeline</div>
+          <div style="font-size:1.25rem;font-weight:800;" id="pipelineTotal">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Active</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--primary-light);" id="pipelineActive">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Won</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--success);" id="pipelineWon">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Lost</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--danger);" id="pipelineLost">0</div>
+        </div>
+      </div>
+
+      <!-- Kanban Board -->
+      <div class="kanban-board" id="kanbanBoard">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Edit Card Modal -->
+  <div class="modal-overlay" id="editCardModal">
+    <div class="modal" style="max-width:460px;">
+      <div class="modal-header">
+        <h3>✏️ Edit Pipeline Card</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <form id="editCardForm">
+        <input type="hidden" id="editCardId">
+        <div class="modal-body">
+          <div style="font-size:0.85rem;font-weight:600;margin-bottom:1rem;" id="editCardName"></div>
+          <div class="form-group">
+            <label class="form-label" for="editCardStage">Stage</label>
+            <select id="editCardStage" class="form-select">
+              <option value="discovered">Discovered</option>
+              <option value="analyzed">Analyzed</option>
+              <option value="email_sent">Email Sent</option>
+              <option value="opened">Opened</option>
+              <option value="replied">Replied</option>
+              <option value="interested">Interested</option>
+              <option value="meeting_scheduled">Meeting Scheduled</option>
+              <option value="proposal_sent">Proposal Sent</option>
+              <option value="won">Won</option>
+              <option value="lost">Lost</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editCardNotes">Notes</label>
+            <textarea id="editCardNotes" class="form-textarea" rows="4" placeholder="Add notes about this lead..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="Modal.close('editCardModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">💾 Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/pipeline.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
+      App.init();
+      Pipeline.init();
+      Pipeline.setupEditForm();
+    });
+  </script>
+</body>
+</html>

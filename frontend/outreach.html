@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Outreach — LeadForge AI</title>
+  <meta name="description" content="Review, edit, approve, and send AI-generated outreach emails to your leads.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+<body>
+  <div class="app-layout">
+    <div id="sidebarContainer"></div>
+
+    <main class="main-content" id="mainContent">
+      <!-- Header -->
+      <div class="top-header">
+        <div class="page-title-section">
+          <h1>Outreach</h1>
+          <p>Review and manage AI-generated outreach emails.</p>
+        </div>
+        <div class="header-actions">
+          <select class="form-select" id="outreachCampaignFilter" style="width:200px;padding:0.5rem 2rem 0.5rem 0.75rem;">
+            <option value="">All Campaigns</option>
+          </select>
+          <button class="btn btn-success btn-sm" onclick="Outreach.approveAll()">✓ Approve All</button>
+          <button class="btn btn-primary btn-sm" onclick="Outreach.sendAll()">📤 Send All Approved</button>
+        </div>
+      </div>
+
+      <!-- Stats Row -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Total Emails</div>
+          <div style="font-size:1.25rem;font-weight:800;" id="totalEmails">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Pending Review</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--warning);" id="pendingCount">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Approved</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--success);" id="approvedCount">0</div>
+        </div>
+        <div class="glass-card-static p-4 text-center">
+          <div style="font-size:0.72rem;color:var(--text-muted);">Sent</div>
+          <div style="font-size:1.25rem;font-weight:800;color:var(--primary-light);" id="sentCount">0</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" id="emailTabs">
+        <button class="tab active" data-filter="all">All</button>
+        <button class="tab" data-filter="pending">Pending</button>
+        <button class="tab" data-filter="draft">Draft</button>
+        <button class="tab" data-filter="approved">Approved</button>
+        <button class="tab" data-filter="sent">Sent</button>
+        <button class="tab" data-filter="rejected">Rejected</button>
+      </div>
+
+      <!-- Email List -->
+      <div class="space-y-4" id="emailsList">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Edit Email Modal -->
+  <div class="modal-overlay" id="editEmailModal">
+    <div class="modal" style="max-width:600px;">
+      <div class="modal-header">
+        <h3>✏️ Edit Email</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <form id="editEmailForm">
+        <input type="hidden" id="editEmailId">
+        <div class="modal-body">
+          <div style="margin-bottom:0.75rem;">
+            <span style="font-size:0.72rem;color:var(--text-muted);">To: </span>
+            <span style="font-size:0.82rem;" id="editEmailTo"></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editEmailSubject">Subject</label>
+            <input type="text" id="editEmailSubject" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="editEmailBody">Body</label>
+            <textarea id="editEmailBody" class="form-textarea" rows="10" required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="Modal.close('editEmailModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Preview Email Modal -->
+  <div class="modal-overlay" id="previewEmailModal">
+    <div class="modal" style="max-width:600px;">
+      <div class="modal-header">
+        <h3>📧 Email Preview</h3>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="previewEmailBody">
+        <!-- Populated by JS -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="Modal.close('previewEmailModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/outreach.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
+      App.init();
+      Outreach.init();
+    });
+  </script>
+</body>
+</html>
