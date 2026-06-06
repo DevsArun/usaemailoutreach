@@ -246,7 +246,10 @@ async def discover_emails(request: DiscoverEmailsRequest):
 async def _safe_scrape(scrape_fn, *args, **kwargs):
     """Wrapper that catches all exceptions so one failed source doesn't kill the batch."""
     try:
-        return await asyncio.wait_for(scrape_fn(*args, **kwargs), timeout=300)
+        # Generous timeout — per-place navigation + review extraction is slow.
+        # The scraper itself respects an internal time budget and returns
+        # partial results, so this is just a hard safety ceiling.
+        return await asyncio.wait_for(scrape_fn(*args, **kwargs), timeout=900)
     except asyncio.TimeoutError:
         logger.warning("Scrape timed out for %s", scrape_fn)
         return []

@@ -29,11 +29,6 @@ async function processCampaign(campaignId, userId) {
       const business = businesses[i];
 
       try {
-        if (campaign.settings.scrape_reviews) {
-          await updateProgress(campaign, 'collecting_reviews', { current: i + 1, total: businesses.length });
-          await collectReviews(business);
-        }
-
         if (campaign.settings.crawl_websites && business.website) {
           await updateProgress(campaign, 'crawling_websites', { current: i + 1, total: businesses.length });
           await crawlWebsite(business);
@@ -41,23 +36,19 @@ async function processCampaign(campaignId, userId) {
 
         if (campaign.settings.find_emails && business.website) {
           await updateProgress(campaign, 'finding_emails', { current: i + 1, total: businesses.length });
-          await discoverEmails(business);
+          // Discovers emails AND verifies them — only valid emails are stored.
+          await discoverEmails(business, campaign);
         }
 
         await updateProgress(campaign, 'analyzing', { current: i + 1, total: businesses.length });
         await analyzeBusiness(business, campaign);
-
-        if (campaign.settings.verify_emails) {
-          await updateProgress(campaign, 'verifying_emails', { current: i + 1, total: businesses.length });
-          await verifyBusinessEmails(business);
-        }
 
         if (campaign.settings.generate_outreach) {
           await updateProgress(campaign, 'generating_outreach', { current: i + 1, total: businesses.length });
           await generateOutreach(business, campaign);
         }
 
-        await sleep(2000);
+        await sleep(1500);
       } catch (err) {
         logger.error(`Error processing business ${business.id} (${business.name}):`, err);
         continue;
@@ -70,20 +61,29 @@ async function processCampaign(campaignId, userId) {
       progress: { ...campaign.progress, current_stage: 'completed' },
     });
 
-    await AnalyticsEvent.create({
-      campaign_id: campaignId,
-      event_type: 'campaign_completed',
-      metadata: { total_businesses: businesses.length },
-    });
+    // Analytics logging must never be able to flip a completed campaign to failed.
+    try {
+      await AnalyticsEvent.create({
+        campaign_id: campaignId,
+        event_type: 'campaign_completed',
+        metadata: { total_businesses: businesses.length },
+      });
+    } catch (e) {
+      logger.warn(`Could not log campaign_completed event: ${e.message}`);
+    }
 
-    logger.info(`Campaign ${campaignId} completed successfully.`);
+    logger.info(`Campaign ${campaignId} completed successfully with ${businesses.length} businesses.`);
   } catch (error) {
     logger.error(`Campaign ${campaignId} failed:`, error);
-    await campaign.update({
-      status: 'failed',
-      error_message: error.message,
-      progress: { ...campaign.progress, current_stage: 'failed' },
-    });
+    try {
+      await campaign.update({
+        status: 'failed',
+        error_message: error.message,
+        progress: { ...campaign.progress, current_stage: 'failed' },
+      });
+    } catch (e) {
+      logger.error(`Could not mark campaign ${campaignId} failed: ${e.message}`);
+    }
   }
 }
 
@@ -91,14 +91,18 @@ async function discoverBusinesses(campaign) {
   try {
     const response = await axios.post(`${SCRAPER_URL}/scrape/businesses`, {
       query: campaign.query,
-      sources: campaign.settings.sources || ['google_maps'],
+      // Google Maps is the single discovery source; business websites are then
+      // crawled for emails. (Other directories are intentionally not used.)
+      sources: ['google_maps'],
       max_results: campaign.settings.max_results || 100,
-    }, { timeout: 300000 });
+    }, { timeout: 720000 });
 
     const businessData = response.data.businesses || [];
     const created = [];
+    let reviewsStored = 0;
 
     for (const biz of businessData) {
+      if (!biz.name) continue;
       const existing = await Business.findOne({
         where: {
           campaign_id: campaign.id,
@@ -124,9 +128,28 @@ async function discoverBusinesses(campaign) {
           latitude: biz.latitude || null,
           longitude: biz.longitude || null,
         });
+
+        // Reviews are collected inline during business scraping.
+        if (Array.isArray(biz.reviews) && biz.reviews.length) {
+          for (const rev of biz.reviews.slice(0, 20)) {
+            try {
+              await Review.create({
+                business_id: business.id,
+                reviewer_name: rev.reviewer_name || 'Anonymous',
+                rating: parseInt(rev.rating) || 0,
+                text: rev.text || '',
+                review_date: rev.date || '',
+                source: 'google_maps',
+              });
+              reviewsStored++;
+            } catch (e) { /* skip bad review */ }
+          }
+        }
         created.push(business);
       }
     }
+
+    if (reviewsStored) logger.info(`Stored ${reviewsStored} reviews inline for campaign ${campaign.id}`);
 
     await campaign.update({
       progress: {
@@ -207,7 +230,7 @@ async function crawlWebsite(business) {
   }
 }
 
-async function discoverEmails(business) {
+async function discoverEmails(business, campaign) {
   if (!business.website) return;
 
   try {
@@ -218,20 +241,54 @@ async function discoverEmails(business) {
     }, { timeout: 120000 });
 
     const emails = response.data.emails || [];
-    for (const em of emails) {
-      const existing = await Email.findOne({
-        where: { business_id: business.id, email: em.email.toLowerCase() },
-      });
+    let storedValid = 0;
 
-      if (!existing) {
-        await Email.create({
-          business_id: business.id,
-          email: em.email.toLowerCase(),
-          type: em.type || 'general',
-          source: em.source_page || business.website,
-        });
+    for (const em of emails) {
+      const addr = (em.email || '').toLowerCase().trim();
+      if (!addr) continue;
+
+      const existing = await Email.findOne({
+        where: { business_id: business.id, email: addr },
+      });
+      if (existing) continue;
+
+      // VERIFY BEFORE STORING — only deliverable ('valid') emails are persisted.
+      // Anything risky / invalid / catch-all is discarded and never written to the DB.
+      let verification;
+      try {
+        verification = await verifyEmail(addr);
+      } catch (e) {
+        verification = { status: 'risky', details: { error: e.message } };
       }
+
+      if (verification.status !== 'valid') {
+        logger.info(`Discarding unverified email ${addr} (${verification.status}) for ${business.name}`);
+        continue;
+      }
+
+      await Email.create({
+        business_id: business.id,
+        email: addr,
+        type: em.type || 'general',
+        source: em.source_page || business.website,
+        verification_status: 'valid',
+        verification_details: verification.details || {},
+        verified_at: new Date(),
+      });
+      storedValid++;
     }
+
+    if (campaign && storedValid) {
+      await campaign.update({
+        progress: {
+          ...campaign.progress,
+          emails_found: (campaign.progress.emails_found || 0) + storedValid,
+          emails_verified: (campaign.progress.emails_verified || 0) + storedValid,
+        },
+      });
+    }
+
+    if (storedValid) logger.info(`Stored ${storedValid} verified email(s) for ${business.name}`);
   } catch (error) {
     logger.error(`Email discovery failed for ${business.name}: ${error.message}`);
   }
@@ -335,8 +392,6 @@ async function generateOutreach(business, campaign) {
   await campaign.update({
     progress: {
       ...campaign.progress,
-      emails_found: (campaign.progress.emails_found || 0) + validEmails.length,
-      emails_verified: (campaign.progress.emails_verified || 0) + validEmails.length,
       outreach_generated: (campaign.progress.outreach_generated || 0) + 1,
     },
   });

@@ -29,6 +29,8 @@ class BusinessData:
     source: str = ""
     latitude: float | None = None
     longitude: float | None = None
+    place_url: str = ""
+    reviews: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +47,8 @@ class BusinessData:
             "source": self.source,
             "latitude": self.latitude,
             "longitude": self.longitude,
+            "place_url": self.place_url,
+            "reviews": self.reviews,
         }
 
 

@@ -167,7 +167,7 @@ router.put('/:id/start', async (req, res, next) => {
     await AnalyticsEvent.create({
       campaign_id: campaign.id,
       event_type: 'campaign_started',
-    });
+    }).catch(e => logger.warn(`Could not log campaign_started: ${e.message}`));
 
     logger.info(`Campaign started: ${campaign.id}`);
 
