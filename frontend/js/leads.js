@@ -156,7 +156,7 @@ const Leads = (() => {
       },
       {
         headerName: 'Actions',
-        width: 110,
+        width: 135,
         pinned: 'right',
         suppressMenu: true,
         sortable: false,
@@ -165,6 +165,7 @@ const Leads = (() => {
             <div style="display:flex;gap:4px;align-items:center;height:100%;">
               <button class="btn btn-ghost btn-sm" style="padding:4px 6px;font-size:0.75rem;" onclick="Leads.viewDetail('${params.data.id}')" title="View">👁</button>
               <button class="btn btn-ghost btn-sm" style="padding:4px 6px;font-size:0.75rem;" onclick="Leads.sendEmail('${params.data.id}')" title="Email">✉️</button>
+              <button class="btn btn-ghost btn-sm" style="padding:4px 6px;font-size:0.75rem;color:var(--danger-light,#ef4444);" onclick="Leads.deleteLead('${params.data.id}')" title="Delete">🗑</button>
             </div>
           `;
         },
@@ -338,6 +339,36 @@ const Leads = (() => {
     window.location.href = `outreach.html?business_id=${id}`;
   }
 
+  async function deleteLead(id) {
+    if (!confirm('Delete this lead? This also removes its reviews, emails and outreach. This cannot be undone.')) return;
+    try {
+      await API.businesses.delete(id);
+      Toast.success('Lead deleted.');
+      await loadLeads();
+    } catch (err) {
+      Toast.error(err.message || 'Failed to delete lead.');
+    }
+  }
+
+  async function deleteSelected() {
+    const selected = getSelectedLeads();
+    if (!selected.length) {
+      Toast.info('Select at least one lead to delete.');
+      return;
+    }
+    if (!confirm(`Delete ${selected.length} selected lead(s)? This also removes their reviews, emails and outreach. This cannot be undone.`)) return;
+    try {
+      const ids = selected.map(r => r.id);
+      const result = await API.businesses.bulkDelete(ids);
+      Toast.success(result.message || `${ids.length} lead(s) deleted.`);
+      const bulkActions = document.getElementById('bulkActions');
+      if (bulkActions) bulkActions.style.display = 'none';
+      await loadLeads();
+    } catch (err) {
+      Toast.error(err.message || 'Failed to delete leads.');
+    }
+  }
+
   function exportCSV() {
     if (gridApi) {
       gridApi.exportDataAsCsv({
@@ -352,5 +383,5 @@ const Leads = (() => {
     return gridApi ? gridApi.getSelectedRows() : [];
   }
 
-  return { init, viewDetail, sendEmail, updateStage, exportCSV, getSelectedLeads, loadLeads };
+  return { init, viewDetail, sendEmail, updateStage, deleteLead, deleteSelected, exportCSV, getSelectedLeads, loadLeads };
 })();

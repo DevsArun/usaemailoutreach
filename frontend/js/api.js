@@ -147,6 +147,8 @@ const API = (() => {
       list: (campaignId) => request('GET', campaignId ? `/businesses?campaign_id=${campaignId}` : '/businesses'),
       get: (id) => request('GET', `/businesses/${id}`),
       updateStage: (id, stage) => request('PUT', `/businesses/${id}/stage`, { stage }),
+      delete: (id) => request('DELETE', `/businesses/${id}`),
+      bulkDelete: (ids) => request('POST', '/businesses/bulk-delete', { ids }),
     },
 
     // ---- Outreach ----

@@ -63,8 +63,8 @@
           <!-- Bulk Actions (hidden by default) -->
           <div id="bulkActions" style="display:none;align-items:center;gap:0.5rem;margin-left:auto;">
             <span style="font-size:0.78rem;color:var(--text-muted);"><span id="selectedCount">0</span> selected</span>
-            <button class="btn btn-primary btn-sm" onclick="alert('Batch email feature — select leads and send outreach')">✉️ Send Email</button>
             <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export</button>
+            <button class="btn btn-danger btn-sm" onclick="Leads.deleteSelected()">🗑 Delete Selected</button>
           </div>
         </div>
       </div>

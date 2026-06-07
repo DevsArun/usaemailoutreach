@@ -1,5 +1,5 @@
 const express = require('express');
-const { Business, Review, WebsiteAnalysis, Email, OutreachEmail, Campaign } = require('../models');
+const { Business, Review, WebsiteAnalysis, Email, OutreachEmail, Followup, Campaign } = require('../models');
 const authenticate = require('../middleware/auth');
 const { paginationValidation } = require('../utils/validators');
 const { buildPaginationMeta } = require('../utils/helpers');
@@ -173,6 +173,64 @@ router.get('/:id/reviews', async (req, res, next) => {
       success: true,
       data: { reviews },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Cascade-delete a set of businesses and all their child records.
+async function deleteBusinessesCascade(businessIds) {
+  if (!businessIds.length) return;
+  const outreach = await OutreachEmail.findAll({
+    where: { business_id: businessIds }, attributes: ['id'], raw: true,
+  });
+  const outreachIds = outreach.map(o => o.id);
+  if (outreachIds.length) await Followup.destroy({ where: { outreach_id: outreachIds } });
+  await OutreachEmail.destroy({ where: { business_id: businessIds } });
+  await Email.destroy({ where: { business_id: businessIds } });
+  await Review.destroy({ where: { business_id: businessIds } });
+  await WebsiteAnalysis.destroy({ where: { business_id: businessIds } });
+  await Business.destroy({ where: { id: businessIds } });
+}
+
+// Bulk delete leads (only those whose campaign belongs to the current user).
+router.post('/bulk-delete', async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'Provide a non-empty "ids" array.' });
+    }
+
+    const owned = await Business.findAll({
+      where: { id: ids },
+      include: [{ model: Campaign, as: 'campaign', where: { user_id: req.user.id }, attributes: [] }],
+      attributes: ['id'],
+      raw: true,
+    });
+    const ownedIds = owned.map(b => b.id);
+    if (ownedIds.length === 0) {
+      return res.status(404).json({ success: false, message: 'No matching leads found.' });
+    }
+
+    await deleteBusinessesCascade(ownedIds);
+    res.json({ success: true, message: `${ownedIds.length} lead(s) deleted.`, data: { deleted: ownedIds.length } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a single lead.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const business = await Business.findByPk(req.params.id, {
+      include: [{ model: Campaign, as: 'campaign', where: { user_id: req.user.id }, attributes: ['id'] }],
+    });
+    if (!business) {
+      return res.status(404).json({ success: false, message: 'Lead not found.' });
+    }
+
+    await deleteBusinessesCascade([business.id]);
+    res.json({ success: true, message: 'Lead deleted.' });
   } catch (error) {
     next(error);
   }
