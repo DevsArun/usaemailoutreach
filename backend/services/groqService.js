@@ -1,8 +1,9 @@
 const { callGroq } = require('../config/groq');
 const logger = require('../utils/logger');
 
-// Signature name used to sign every outreach email.
+// Signature used to sign every outreach email.
 const SENDER_NAME = process.env.OUTREACH_SENDER_NAME || 'DevsArun';
+const SENDER_TITLE = process.env.OUTREACH_SENDER_TITLE || 'Full Stack Developer';
 
 const SERVICE_CATALOG = {
   website_dev: { name: 'Website Development', keywords: ['no website', 'poor website', 'outdated'] },
@@ -136,19 +137,20 @@ async function generateOutreachEmail(business, reviews, websiteAnalysis, aiAnaly
   const prompt = [
     {
       role: 'system',
-      content: `You are ${SENDER_NAME}, an independent web & automation specialist writing a one-to-one cold email to a local business owner.
+      content: `You are ${SENDER_NAME}, a professional ${SENDER_TITLE} writing a one-to-one cold email to a local business owner.
 
-Write a HIGHLY PERSONALIZED email that proves you actually researched THIS specific business. Rules:
+Write a HIGHLY PERSONALIZED, professional email that proves you actually researched THIS specific business. Rules:
 - Open by referencing something concrete about the business (its name, what customers say in reviews, or a specific gap on their website).
 - Naturally weave in 1-2 real issues (from reviews or the website findings) — do NOT list them like a report.
-- Propose ONE clear, relevant improvement and the outcome it drives (more booked jobs, fewer missed calls, more reviews).
-- Under 130 words. Warm, human, confident — not salesy, no buzzwords, no "I hope this finds you well".
-- Use the owner's first name if provided, else a natural greeting (e.g. "Hi there,").
-- NO portfolio links, NO pricing, NO bullet lists, NO "I am a web developer" intro.
-- End with a soft question as the call to action.
-- The email body MUST end with EXACTLY these two lines:
+- Propose ONE clear, relevant improvement and the business outcome it drives (more booked jobs, fewer missed calls, more reviews).
+- Professional but warm and human — confident, concise, no fluff, no "I hope this finds you well", no buzzwords.
+- 90-140 words. Use the owner's first name if provided, else "Hi there,".
+- NO portfolio links, NO pricing, NO bullet lists.
+- The call to action MUST be a direct, polite question asking whether they are interested / open to it — e.g. "Would you be interested in a quick 10-minute call this week?" or "Is improving this something you'd be open to exploring?".
+- The email body MUST end with EXACTLY these three lines (nothing after):
 Best regards,
 ${SENDER_NAME}
+${SENDER_TITLE}
 
 Return ONLY a JSON object: {"subject": "...", "body": "..."} with no other text. The subject must be specific to the business (not generic).`,
     },
@@ -185,9 +187,12 @@ KEY ANGLE: ${aiAnalysis.email_angle || 'help them capture and convert more local
     if (!result.subject || !result.body) throw new Error('AI response missing subject/body');
 
     let body = result.body.trim();
-    // Guarantee the required signature.
-    if (!new RegExp(SENDER_NAME, 'i').test(body)) {
-      body = `${body}\n\nBest regards,\n${SENDER_NAME}`;
+    // Guarantee the full professional signature (name + title).
+    const signature = `Best regards,\n${SENDER_NAME}\n${SENDER_TITLE}`;
+    if (!body.includes(SENDER_TITLE)) {
+      // Drop any short trailing sign-off the model may have added, then append ours.
+      body = body.replace(/\n+\s*(best regards|warm regards|kind regards|regards|sincerely|cheers|thanks(,| you)?)[\s\S]{0,60}$/i, '').trim();
+      body = `${body}\n\n${signature}`;
     }
 
     return { subject: result.subject.trim(), body };

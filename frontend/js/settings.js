@@ -248,7 +248,9 @@ const Settings = (() => {
           </div>
           <div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.15rem;">
             Added ${Utils.formatDate(key.created_at)}
-            ${key.is_active ? ' · <span style="color:var(--success);">Active</span>' : ' · <span style="color:var(--danger);">Inactive</span>'}
+            ${(key.status ? key.status === 'active' : key.is_active !== false)
+              ? ' · <span style="color:var(--success);">Active</span>'
+              : ` · <span style="color:var(--danger);">${key.status === 'rate_limited' ? 'Rate limited' : key.status === 'invalid' ? 'Invalid' : 'Inactive'}</span>`}
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" style="color:var(--danger-light);" onclick="Settings.deleteGroqKey('${key.id}')">🗑</button>
