@@ -137,22 +137,27 @@ async function generateOutreachEmail(business, reviews, websiteAnalysis, aiAnaly
   const prompt = [
     {
       role: 'system',
-      content: `You are ${SENDER_NAME}, a professional ${SENDER_TITLE} writing a one-to-one cold email to a local business owner.
+      content: `You are ${SENDER_NAME}, a professional ${SENDER_TITLE}. Write a personalized cold outreach email to a local business owner that reads like a thoughtful human wrote it AFTER actually researching their business.
 
-Write a HIGHLY PERSONALIZED, professional email that proves you actually researched THIS specific business. Rules:
-- Open by referencing something concrete about the business (its name, what customers say in reviews, or a specific gap on their website).
-- Naturally weave in 1-2 real issues (from reviews or the website findings) — do NOT list them like a report.
-- Propose ONE clear, relevant improvement and the business outcome it drives (more booked jobs, fewer missed calls, more reviews).
-- Professional but warm and human — confident, concise, no fluff, no "I hope this finds you well", no buzzwords.
-- 90-140 words. Use the owner's first name if provided, else "Hi there,".
-- NO portfolio links, NO pricing, NO bullet lists.
-- The call to action MUST be a direct, polite question asking whether they are interested / open to it — e.g. "Would you be interested in a quick 10-minute call this week?" or "Is improving this something you'd be open to exploring?".
-- The email body MUST end with EXACTLY these three lines (nothing after):
+FORMATTING IS CRITICAL. The "body" MUST use real line breaks and be split into short sections separated by a blank line. Follow this EXACT structure (keep the blank lines):
+
+Hi <OwnerFirstName>, (or "Hi there," if no name)
+
+<Paragraph 1: 1-2 sentences referencing something specific and genuine about THEIR business — their Google rating and what customers praise in the reviews.>
+
+<Paragraph 2: 1-2 sentences naming a concrete gap you noticed from their reviews or website, and why it quietly costs them customers.>
+
+<Paragraph 3: 1-2 sentences proposing ONE specific thing you can build for them and the real outcome it delivers (more booked jobs, fewer missed enquiries, more reviews).>
+
+<One short line: a direct, friendly question asking if they're interested — e.g. "If this sounds useful, can I send a quick 1-minute demo?">
+
 Best regards,
 ${SENDER_NAME}
 ${SENDER_TITLE}
 
-Return ONLY a JSON object: {"subject": "...", "body": "..."} with no other text. The subject must be specific to the business (not generic).`,
+STYLE: warm, professional, confident, specific to THIS business. 110-170 words. Natural human tone. NO "I hope this finds you well", NO buzzwords, NO pricing, NO links, NO bullet points.
+
+Return ONLY valid JSON: {"subject":"...","body":"..."} — and inside the body string use \\n for line breaks and \\n\\n between paragraphs. The subject must be specific to the business (not generic).`,
     },
     {
       role: 'user',
@@ -179,21 +184,41 @@ KEY ANGLE: ${aiAnalysis.email_angle || 'help them capture and convert more local
   ];
 
   try {
-    const response = await callGroq(prompt, { temperature: 0.85, maxTokens: 1024 });
+    const response = await callGroq(prompt, { temperature: 0.8, maxTokens: 1024 });
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No valid JSON in response');
 
-    const result = JSON.parse(jsonMatch[0]);
+    let result;
+    try {
+      result = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      // Models often emit literal newlines inside the JSON string (invalid
+      // JSON). Extract the fields manually and unescape.
+      const subj = jsonMatch[0].match(/"subject"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const bod = jsonMatch[0].match(/"body"\s*:\s*"([\s\S]*?)"\s*\}\s*$/);
+      if (!subj || !bod) throw e;
+      result = {
+        subject: subj[1].replace(/\\"/g, '"'),
+        body: bod[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+      };
+    }
     if (!result.subject || !result.body) throw new Error('AI response missing subject/body');
 
     let body = result.body.trim();
-    // Guarantee the full professional signature (name + title).
-    const signature = `Best regards,\n${SENDER_NAME}\n${SENDER_TITLE}`;
-    if (!body.includes(SENDER_TITLE)) {
-      // Drop any short trailing sign-off the model may have added, then append ours.
-      body = body.replace(/\n+\s*(best regards|warm regards|kind regards|regards|sincerely|cheers|thanks(,| you)?)[\s\S]{0,60}$/i, '').trim();
-      body = `${body}\n\n${signature}`;
+
+    // ── Normalize formatting so the email always reads cleanly ──
+    // 1) Greeting on its own line (with a blank line after it).
+    body = body.replace(/^(hi\b[^,\n]{0,40},|hello\b[^,\n]{0,40},|hey\b[^,\n]{0,40},)[ \t]+/i, '$1\n\n');
+    // 2) Replace any trailing sign-off the model added with a clean signature block.
+    const signoffRe = /(best\s+regards|warm\s+regards|kind\s+regards|regards|sincerely|cheers|thanks|thank\s+you)\b/gi;
+    let lastIdx = -1, mm;
+    while ((mm = signoffRe.exec(body)) !== null) lastIdx = mm.index;
+    if (lastIdx !== -1 && lastIdx >= body.length - 110) {
+      body = body.slice(0, lastIdx).trim();
     }
+    body = `${body}\n\nBest regards,\n${SENDER_NAME}\n${SENDER_TITLE}`;
+    // 3) Collapse any 3+ consecutive newlines down to a clean paragraph break.
+    body = body.replace(/\n{3,}/g, '\n\n');
 
     return { subject: result.subject.trim(), body };
   } catch (error) {
