@@ -24,6 +24,7 @@
           <p>Browse, filter, and manage all discovered business leads.</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-success btn-sm" onclick="Leads.verifyAndGenerate()" title="Re-verify all pending emails, then auto-generate AI outreach for valid leads">✅ Verify Emails &amp; Generate</button>
           <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export CSV</button>
           <button class="btn btn-primary btn-sm" onclick="Leads.loadLeads()">🔄 Refresh</button>
         </div>

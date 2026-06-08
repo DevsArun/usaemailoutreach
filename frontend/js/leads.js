@@ -369,6 +369,23 @@ const Leads = (() => {
     }
   }
 
+  // Re-verify all pending/risky emails, then auto-generate AI outreach for any
+  // valid lead that doesn't have a draft yet. Runs in the background on the server.
+  async function verifyAndGenerate() {
+    if (!confirm('Re-verify all pending emails and auto-generate AI outreach for valid leads?\n\n(Make sure a Groq API key is added in Settings — outreach needs it.)')) return;
+    const campaignFilter = document.getElementById('leadCampaignFilter');
+    const params = new URLSearchParams(window.location.search);
+    const cid = (campaignFilter && campaignFilter.value) || params.get('campaign_id') || null;
+    try {
+      const result = await API.businesses.verifyEmails(cid);
+      Toast.success(result.message || 'Verification started.', 'Verifying', 7000);
+      // Refresh leads after a short delay so newly-valid emails appear.
+      setTimeout(() => loadLeads(), 8000);
+    } catch (err) {
+      Toast.error(err.message || 'Failed to start verification.');
+    }
+  }
+
   function exportCSV() {
     if (gridApi) {
       gridApi.exportDataAsCsv({
@@ -383,5 +400,5 @@ const Leads = (() => {
     return gridApi ? gridApi.getSelectedRows() : [];
   }
 
-  return { init, viewDetail, sendEmail, updateStage, deleteLead, deleteSelected, exportCSV, getSelectedLeads, loadLeads };
+  return { init, viewDetail, sendEmail, updateStage, deleteLead, deleteSelected, verifyAndGenerate, exportCSV, getSelectedLeads, loadLeads };
 })();
