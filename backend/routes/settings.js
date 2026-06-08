@@ -9,6 +9,33 @@ const logger = require('../utils/logger');
 const router = express.Router();
 router.use(authenticate);
 
+// Resolve the correct SMTP + IMAP settings from the email domain (preferred)
+// so a Gmail address can never end up with an Outlook host, etc.
+function resolveMailConfig({ email, provider, host, port }) {
+  const domain = (String(email).split('@')[1] || '').toLowerCase();
+  const known = {
+    'gmail.com':      { provider: 'gmail',   host: 'smtp.gmail.com',        port: 465, secure: true,  imap_host: 'imap.gmail.com' },
+    'googlemail.com': { provider: 'gmail',   host: 'smtp.gmail.com',        port: 465, secure: true,  imap_host: 'imap.gmail.com' },
+    'outlook.com':    { provider: 'outlook', host: 'smtp-mail.outlook.com', port: 587, secure: false, imap_host: 'outlook.office365.com' },
+    'hotmail.com':    { provider: 'outlook', host: 'smtp-mail.outlook.com', port: 587, secure: false, imap_host: 'outlook.office365.com' },
+    'live.com':       { provider: 'outlook', host: 'smtp-mail.outlook.com', port: 587, secure: false, imap_host: 'outlook.office365.com' },
+    'msn.com':        { provider: 'outlook', host: 'smtp-mail.outlook.com', port: 587, secure: false, imap_host: 'outlook.office365.com' },
+    'yahoo.com':      { provider: 'custom',  host: 'smtp.mail.yahoo.com',   port: 465, secure: true,  imap_host: 'imap.mail.yahoo.com' },
+    'zoho.com':       { provider: 'custom',  host: 'smtp.zoho.com',         port: 465, secure: true,  imap_host: 'imap.zoho.com' },
+  };
+  if (known[domain]) return known[domain];
+
+  // Custom / unknown domain: trust the provided host/port.
+  const p = parseInt(port) || 587;
+  return {
+    provider: provider || 'custom',
+    host: host || '',
+    port: p,
+    secure: p === 465,
+    imap_host: host ? host.replace(/^smtp\./i, 'imap.') : null,
+  };
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const settings = await Setting.findAll({
@@ -66,37 +93,25 @@ router.get('/smtp', async (req, res, next) => {
 
 router.post('/smtp', smtpValidation, async (req, res, next) => {
   try {
-    const { provider, email, password, host, port, daily_limit, imap_host, imap_port } = req.body;
+    const { provider, email, password, host, port, daily_limit } = req.body;
 
-    let smtpHost = host;
-    let smtpPort = port;
-    let secure = true;
+    // Auto-resolve correct host/port/secure/IMAP from the email domain so a
+    // wrong provider selection can't break the connection.
+    const cfg = resolveMailConfig({ email, provider, host, port });
 
-    if (!host) {
-      switch (provider) {
-        case 'gmail':
-          smtpHost = 'smtp.gmail.com';
-          smtpPort = 465;
-          secure = true;
-          break;
-        case 'outlook':
-          smtpHost = 'smtp-mail.outlook.com';
-          smtpPort = 587;
-          secure = false;
-          break;
-      }
+    if (!cfg.host) {
+      return res.status(400).json({ success: false, message: 'SMTP host could not be determined. For a custom domain, enter the SMTP host.' });
     }
 
     const account = await SmtpAccount.create({
       user_id: req.user.id,
-      provider,
+      provider: cfg.provider,
       email,
       password,
-      host: smtpHost,
-      port: smtpPort || 587,
-      secure,
-      imap_host: imap_host || null,
-      imap_port: imap_port || null,
+      host: cfg.host,
+      port: cfg.port || 587,
+      secure: cfg.secure,
+      imap_host: cfg.imap_host || null,
       daily_limit: daily_limit || 500,
     });
 
@@ -193,11 +208,22 @@ router.post('/smtp/:id/test', async (req, res, next) => {
         user: account.email,
         pass: account.password,
       },
-      connectionTimeout: 10000,
-      socketTimeout: 10000,
+      connectionTimeout: 12000,
+      greetingTimeout: 12000,
+      socketTimeout: 12000,
+      tls: { rejectUnauthorized: false },
     });
 
-    await transporter.verify();
+    // Hard timeout guarantees the request always responds (nodemailer's
+    // verify can otherwise hang if the port is filtered with no RST).
+    await Promise.race([
+      transporter.verify(),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error('Connection timed out — the SMTP port may be blocked, or host/port is wrong.')),
+        15000,
+      )),
+    ]);
+    try { transporter.close(); } catch (e) { /* ignore */ }
 
     await account.update({ status: 'active', error_message: null });
 

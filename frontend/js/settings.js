@@ -69,19 +69,26 @@ const Settings = (() => {
       return;
     }
 
-    container.innerHTML = smtpAccounts.map(account => `
+    container.innerHTML = smtpAccounts.map(account => {
+      const st = account.status;
+      const statusBadge = st === 'active'
+        ? '<span class="badge badge-success">Verified</span>'
+        : st === 'error'
+          ? `<span class="badge badge-danger" title="${Utils.escapeHtml(account.error_message || '')}">Failed</span>`
+          : '<span class="badge badge-warning">Not tested</span>';
+      return `
       <div class="glass-card-static p-4 mb-3" data-smtp-id="${account.id}">
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <div style="flex:1;">
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
-              <span style="font-size:0.9rem;font-weight:600;">${Utils.escapeHtml(account.email || account.username || 'Account')}</span>
-              ${account.is_default ? '<span class="badge badge-primary">Default</span>' : ''}
-              ${account.verified ? '<span class="badge badge-success">Verified</span>' : '<span class="badge badge-warning">Unverified</span>'}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;flex-wrap:wrap;">
+              <span style="font-size:0.9rem;font-weight:600;">${Utils.escapeHtml(account.email || 'Account')}</span>
+              ${statusBadge}
             </div>
             <div style="font-size:0.75rem;color:var(--text-muted);">
               ${Utils.escapeHtml(account.host || 'smtp.example.com')}:${account.port || 587}
-              ${account.from_name ? ` · ${Utils.escapeHtml(account.from_name)}` : ''}
+              · limit ${account.daily_limit || 500}/day
             </div>
+            ${st === 'error' && account.error_message ? `<div style="font-size:0.7rem;color:var(--danger,#ef4444);margin-top:0.25rem;">${Utils.escapeHtml(account.error_message)}</div>` : ''}
           </div>
           <div style="display:flex;gap:0.5rem;">
             <button class="btn btn-secondary btn-sm" onclick="Settings.testSmtp('${account.id}')">🧪 Test</button>
@@ -90,46 +97,47 @@ const Settings = (() => {
           </div>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function setupSmtpForm() {
     const form = document.getElementById('smtpForm');
     if (!form) return;
 
+    // Show/hide the custom host+port fields based on the selected provider.
+    const providerEl = document.getElementById('smtpProvider');
+    const customFields = document.getElementById('smtpCustomFields');
+    const toggleCustom = () => {
+      if (customFields) customFields.style.display = (providerEl && providerEl.value === 'custom') ? 'block' : 'none';
+    };
+    if (providerEl) {
+      providerEl.addEventListener('change', toggleCustom);
+      toggleCustom();
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const providerEl = document.getElementById('smtpProvider');
+      const provider = providerEl ? providerEl.value : 'gmail';
       const email = document.getElementById('smtpEmail').value.trim();
       const password = document.getElementById('smtpPassword').value;
       const host = document.getElementById('smtpHost').value.trim();
       const port = parseInt(document.getElementById('smtpPort').value) || 587;
-
-      // Use provider dropdown if present, otherwise infer from email domain
-      let provider = providerEl ? providerEl.value : 'other';
-      if (provider === 'custom' || !providerEl) {
-        if (email.includes('@gmail.com')) provider = 'gmail';
-        else if (email.includes('@outlook.com') || email.includes('@hotmail.com') || email.includes('@live.com')) provider = 'outlook';
-        else provider = 'custom';
-      }
-
-      const data = {
-        provider,
-        email,
-        password,
-      };
-      if (provider === 'custom' && host) data.host = host;
-      if (provider === 'custom' && port) data.port = port;
-
-      const dailyLimitEl = document.getElementById('smtpDailyLimit');
-      if (dailyLimitEl && dailyLimitEl.value) {
-        data.daily_limit = parseInt(dailyLimitEl.value);
-      }
+      const dailyLimit = parseInt(document.getElementById('smtpDailyLimit')?.value) || 500;
 
       if (!email || !password) {
-        Toast.warning('Please fill in all required fields.');
+        Toast.warning('Please enter the email and app password.');
         return;
       }
+      if (provider === 'custom' && !host) {
+        Toast.warning('Enter the SMTP host for a custom provider.');
+        return;
+      }
+
+      // Backend auto-resolves the correct host from the email domain; for
+      // custom providers we pass the host/port explicitly.
+      const data = { provider, email, password, daily_limit: dailyLimit };
+      if (provider === 'custom') { data.host = host; data.port = port; }
 
       const btn = form.querySelector('button[type="submit"]');
       const editId = document.getElementById('smtpEditId').value;
@@ -142,10 +150,11 @@ const Settings = (() => {
           Toast.success('SMTP account updated!');
         } else {
           await API.settings.smtp.add(data);
-          Toast.success('SMTP account added!');
+          Toast.success('SMTP account added — click 🧪 Test to verify it.');
         }
         form.reset();
         document.getElementById('smtpEditId').value = '';
+        if (customFields) customFields.style.display = 'none';
         Modal.close('smtpModal');
         await loadSmtpAccounts();
       } catch (err) {
@@ -186,12 +195,14 @@ const Settings = (() => {
   }
 
   async function testSmtp(id) {
-    Toast.info('Testing SMTP connection...');
+    Toast.info('Testing SMTP connection… (this can take up to ~15s)');
     try {
-      await API.settings.smtp.test(id);
-      Toast.success('SMTP connection successful!');
+      const result = await API.settings.smtp.test(id);
+      Toast.success(result.message || 'SMTP connection successful!');
     } catch (err) {
-      Toast.error(err.message || 'SMTP test failed.');
+      Toast.error(err.message || 'SMTP test failed. Check the email/app-password and host.');
+    } finally {
+      await loadSmtpAccounts();
     }
   }
 
