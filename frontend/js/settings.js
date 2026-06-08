@@ -1,6 +1,6 @@
 /* ============================================
    LeadForge AI — Settings Module
-   SMTP, Groq keys, services, proxy settings
+   Email senders (Brevo / Gmail / Custom SMTP), Groq keys, services
    ============================================ */
 
 const Settings = (() => {
@@ -38,7 +38,7 @@ const Settings = (() => {
     ]);
   }
 
-  // ---- SMTP ----
+  // ---- SMTP / Senders ----
   async function loadSmtpAccounts() {
     const container = document.getElementById('smtpList');
     if (!container) return;
@@ -54,6 +54,13 @@ const Settings = (() => {
     }
   }
 
+  function providerLabel(account) {
+    if (account.host === 'brevo-api') return 'Brevo (API)';
+    if (account.provider === 'gmail') return 'Gmail';
+    if (account.provider === 'outlook') return 'Outlook';
+    return account.host || 'Custom SMTP';
+  }
+
   function renderSmtpAccounts() {
     const container = document.getElementById('smtpList');
     if (!container) return;
@@ -62,8 +69,8 @@ const Settings = (() => {
       container.innerHTML = `
         <div class="empty-state">
           <div class="empty-state-icon">📧</div>
-          <h3>No SMTP accounts</h3>
-          <p>Add an SMTP account to start sending outreach emails.</p>
+          <h3>No email senders</h3>
+          <p>Add a Brevo API sender (recommended) or an SMTP account to start sending outreach.</p>
         </div>
       `;
       return;
@@ -85,8 +92,7 @@ const Settings = (() => {
               ${statusBadge}
             </div>
             <div style="font-size:0.75rem;color:var(--text-muted);">
-              ${Utils.escapeHtml(account.host || 'smtp.example.com')}:${account.port || 587}
-              · limit ${account.daily_limit || 500}/day
+              ${Utils.escapeHtml(providerLabel(account))} · limit ${account.daily_limit || 500}/day
             </div>
             ${st === 'error' && account.error_message ? `<div style="font-size:0.7rem;color:var(--danger,#ef4444);margin-top:0.25rem;">${Utils.escapeHtml(account.error_message)}</div>` : ''}
           </div>
@@ -101,32 +107,60 @@ const Settings = (() => {
     }).join('');
   }
 
+  // Update labels / placeholders / hint based on the selected provider.
+  function applyProviderUI() {
+    const provider = document.getElementById('smtpProvider')?.value || 'brevo';
+    const emailLabel = document.getElementById('smtpEmailLabel');
+    const pwLabel = document.getElementById('smtpPasswordLabel');
+    const emailInput = document.getElementById('smtpEmail');
+    const pwInput = document.getElementById('smtpPassword');
+    const hint = document.getElementById('smtpProviderHint');
+    const customFields = document.getElementById('smtpCustomFields');
+
+    if (customFields) customFields.style.display = provider === 'custom' ? 'block' : 'none';
+
+    if (provider === 'brevo') {
+      if (emailLabel) emailLabel.textContent = 'Sender Email (verified in Brevo) *';
+      if (pwLabel) pwLabel.textContent = 'Brevo API Key *';
+      if (emailInput) emailInput.placeholder = 'verified-sender@yourdomain.com';
+      if (pwInput) pwInput.placeholder = 'xkeysib-...';
+      if (hint) hint.innerHTML = 'Brevo sends via its HTTPS API — works even when SMTP ports are blocked (e.g. cloud hosts). Use a sender email you verified in Brevo, and your API key (starts with <code>xkeysib-</code>).';
+    } else if (provider === 'gmail') {
+      if (emailLabel) emailLabel.textContent = 'Gmail Address *';
+      if (pwLabel) pwLabel.textContent = 'App Password *';
+      if (emailInput) emailInput.placeholder = 'you@gmail.com';
+      if (pwInput) pwInput.placeholder = '16-character app password';
+      if (hint) hint.innerHTML = 'Gmail needs 2-Step Verification + an <b>App Password</b> (not your normal password). Note: may time out if the host blocks SMTP ports — Brevo is more reliable.';
+    } else {
+      if (emailLabel) emailLabel.textContent = 'Email Address *';
+      if (pwLabel) pwLabel.textContent = 'Password *';
+      if (emailInput) emailInput.placeholder = 'you@yourdomain.com';
+      if (pwInput) pwInput.placeholder = 'SMTP password';
+      if (hint) hint.innerHTML = 'Enter your provider’s SMTP host & port below. Port 465 = SSL, 587 = STARTTLS.';
+    }
+  }
+
   function setupSmtpForm() {
     const form = document.getElementById('smtpForm');
     if (!form) return;
 
-    // Show/hide the custom host+port fields based on the selected provider.
     const providerEl = document.getElementById('smtpProvider');
-    const customFields = document.getElementById('smtpCustomFields');
-    const toggleCustom = () => {
-      if (customFields) customFields.style.display = (providerEl && providerEl.value === 'custom') ? 'block' : 'none';
-    };
     if (providerEl) {
-      providerEl.addEventListener('change', toggleCustom);
-      toggleCustom();
+      providerEl.addEventListener('change', applyProviderUI);
+      applyProviderUI();
     }
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const provider = providerEl ? providerEl.value : 'gmail';
+      const provider = providerEl ? providerEl.value : 'brevo';
       const email = document.getElementById('smtpEmail').value.trim();
       const password = document.getElementById('smtpPassword').value;
       const host = document.getElementById('smtpHost').value.trim();
       const port = parseInt(document.getElementById('smtpPort').value) || 587;
-      const dailyLimit = parseInt(document.getElementById('smtpDailyLimit')?.value) || 500;
+      const dailyLimit = parseInt(document.getElementById('smtpDailyLimit')?.value) || 300;
 
       if (!email || !password) {
-        Toast.warning('Please enter the email and app password.');
+        Toast.warning(provider === 'brevo' ? 'Enter the sender email and Brevo API key.' : 'Please enter the email and password.');
         return;
       }
       if (provider === 'custom' && !host) {
@@ -134,10 +168,16 @@ const Settings = (() => {
         return;
       }
 
-      // Backend auto-resolves the correct host from the email domain; for
-      // custom providers we pass the host/port explicitly.
-      const data = { provider, email, password, daily_limit: dailyLimit };
-      if (provider === 'custom') { data.host = host; data.port = port; }
+      // Build the payload. Brevo is sent as a custom account with the special
+      // 'brevo-api' host so the backend routes it through the Brevo HTTP API.
+      let data;
+      if (provider === 'brevo') {
+        data = { provider: 'custom', host: 'brevo-api', port: 443, email, password, daily_limit: dailyLimit };
+      } else if (provider === 'custom') {
+        data = { provider: 'custom', host, port, email, password, daily_limit: dailyLimit };
+      } else {
+        data = { provider, email, password, daily_limit: dailyLimit };
+      }
 
       const btn = form.querySelector('button[type="submit"]');
       const editId = document.getElementById('smtpEditId').value;
@@ -147,18 +187,17 @@ const Settings = (() => {
       try {
         if (editId) {
           await API.settings.smtp.update(editId, data);
-          Toast.success('SMTP account updated!');
+          Toast.success('Sender updated!');
         } else {
           await API.settings.smtp.add(data);
-          Toast.success('SMTP account added — click 🧪 Test to verify it.');
+          Toast.success('Sender added — click 🧪 Test to verify it.');
         }
         form.reset();
         document.getElementById('smtpEditId').value = '';
-        if (customFields) customFields.style.display = 'none';
         Modal.close('smtpModal');
         await loadSmtpAccounts();
       } catch (err) {
-        Toast.error(err.message || 'Failed to save SMTP account.');
+        Toast.error(err.message || 'Failed to save sender.');
       } finally {
         btn.disabled = false;
         btn.innerHTML = '💾 Save Account';
@@ -170,19 +209,18 @@ const Settings = (() => {
     const account = smtpAccounts.find(a => a.id === id || a.id === parseInt(id));
     if (!account) return;
 
+    const isBrevo = account.host === 'brevo-api';
     document.getElementById('smtpEditId').value = account.id;
     const providerEl = document.getElementById('smtpProvider');
-    if (providerEl) providerEl.value = account.provider || 'custom';
+    if (providerEl) providerEl.value = isBrevo ? 'brevo' : (account.provider || 'custom');
     document.getElementById('smtpEmail').value = account.email || '';
     document.getElementById('smtpPassword').value = '';
-    document.getElementById('smtpHost').value = account.host || '';
+    document.getElementById('smtpHost').value = isBrevo ? '' : (account.host || '');
     document.getElementById('smtpPort').value = account.port || 587;
     const dailyLimitEl = document.getElementById('smtpDailyLimit');
-    if (dailyLimitEl) dailyLimitEl.value = account.daily_limit || 500;
-    // Toggle custom fields visibility
-    const customFields = document.getElementById('smtpCustomFields');
-    if (customFields) customFields.style.display = (account.provider === 'custom') ? 'block' : 'none';
-    document.getElementById('smtpModalTitle').textContent = '✏️ Edit SMTP Account';
+    if (dailyLimitEl) dailyLimitEl.value = account.daily_limit || 300;
+    applyProviderUI();
+    document.getElementById('smtpModalTitle').textContent = '✏️ Edit Email Sender';
 
     Modal.open('smtpModal');
   }
@@ -190,30 +228,33 @@ const Settings = (() => {
   function openAddSmtp() {
     document.getElementById('smtpForm').reset();
     document.getElementById('smtpEditId').value = '';
-    document.getElementById('smtpModalTitle').textContent = '📧 Add SMTP Account';
+    const providerEl = document.getElementById('smtpProvider');
+    if (providerEl) providerEl.value = 'brevo';
+    applyProviderUI();
+    document.getElementById('smtpModalTitle').textContent = '📧 Add Email Sender';
     Modal.open('smtpModal');
   }
 
   async function testSmtp(id) {
-    Toast.info('Testing SMTP connection… (this can take up to ~15s)');
+    Toast.info('Testing connection… (this can take up to ~15s)');
     try {
       const result = await API.settings.smtp.test(id);
-      Toast.success(result.message || 'SMTP connection successful!');
+      Toast.success(result.message || 'Connection successful!');
     } catch (err) {
-      Toast.error(err.message || 'SMTP test failed. Check the email/app-password and host.');
+      Toast.error(err.message || 'Test failed. Check the credentials.');
     } finally {
       await loadSmtpAccounts();
     }
   }
 
   async function deleteSmtp(id) {
-    if (!confirm('Delete this SMTP account?')) return;
+    if (!confirm('Delete this sender?')) return;
     try {
       await API.settings.smtp.delete(id);
-      Toast.success('SMTP account deleted.');
+      Toast.success('Sender deleted.');
       await loadSmtpAccounts();
     } catch (err) {
-      Toast.error(err.message || 'Failed to delete SMTP account.');
+      Toast.error(err.message || 'Failed to delete sender.');
     }
   }
 

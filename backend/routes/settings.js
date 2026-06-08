@@ -1,5 +1,6 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 const { SmtpAccount, GroqKey, Setting } = require('../models');
 const authenticate = require('../middleware/auth');
 const { smtpValidation, groqKeyValidation } = require('../utils/validators');
@@ -9,9 +10,19 @@ const logger = require('../utils/logger');
 const router = express.Router();
 router.use(authenticate);
 
+// Sentinel host marking a Brevo (HTTP API) sender — works over HTTPS (443),
+// so it is not affected by blocked SMTP ports on hosts like HF Spaces.
+const BREVO_HOST = 'brevo-api';
+
 // Resolve the correct SMTP + IMAP settings from the email domain (preferred)
 // so a Gmail address can never end up with an Outlook host, etc.
 function resolveMailConfig({ email, provider, host, port }) {
+  // Brevo: HTTP API sender — short-circuit before any domain-based lookup
+  // (otherwise a gmail.com sender address would be switched to Gmail SMTP).
+  if (provider === 'brevo' || host === BREVO_HOST) {
+    return { provider: 'custom', host: BREVO_HOST, port: 443, secure: true, imap_host: null };
+  }
+
   const domain = (String(email).split('@')[1] || '').toLowerCase();
   const known = {
     'gmail.com':      { provider: 'gmail',   host: 'smtp.gmail.com',        port: 465, secure: true,  imap_host: 'imap.gmail.com' },
@@ -95,8 +106,8 @@ router.post('/smtp', smtpValidation, async (req, res, next) => {
   try {
     const { provider, email, password, host, port, daily_limit } = req.body;
 
-    // Auto-resolve correct host/port/secure/IMAP from the email domain so a
-    // wrong provider selection can't break the connection.
+    // Auto-resolve correct host/port/secure/IMAP from the email domain (or
+    // Brevo HTTP API) so a wrong provider selection can't break sending.
     const cfg = resolveMailConfig({ email, provider, host, port });
 
     if (!cfg.host) {
@@ -115,11 +126,11 @@ router.post('/smtp', smtpValidation, async (req, res, next) => {
       daily_limit: daily_limit || 500,
     });
 
-    logger.info(`SMTP account added: ${email}`);
+    logger.info(`Mail account added: ${email} (${cfg.host === BREVO_HOST ? 'brevo' : cfg.host})`);
 
     res.status(201).json({
       success: true,
-      message: 'SMTP account added.',
+      message: 'Account added.',
       data: {
         account: {
           id: account.id,
@@ -200,6 +211,24 @@ router.post('/smtp/:id/test', async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'SMTP account not found.' });
     }
 
+    // ── Brevo (HTTP API): validate the API key via the account endpoint ──
+    if (account.host === BREVO_HOST) {
+      try {
+        const resp = await axios.get('https://api.brevo.com/v3/account', {
+          headers: { 'api-key': account.password, accept: 'application/json' },
+          timeout: 15000,
+        });
+        const planEmail = resp.data && resp.data.email ? ` (${resp.data.email})` : '';
+        await account.update({ status: 'active', error_message: null });
+        return res.json({ success: true, message: `Brevo API key is valid${planEmail}. Ready to send.` });
+      } catch (e) {
+        const msg = (e.response && e.response.data && e.response.data.message) || e.message;
+        await account.update({ status: 'error', error_message: `Brevo: ${msg}` });
+        return res.status(400).json({ success: false, message: `Brevo test failed: ${msg}` });
+      }
+    }
+
+    // ── Standard SMTP test ──
     const transporter = nodemailer.createTransport({
       host: account.host,
       port: account.port,

@@ -25,7 +25,7 @@
 
       <!-- Settings Tabs -->
       <div class="tabs" id="settingsTabs">
-        <button class="tab active" data-panel="panelSmtp">📧 SMTP Accounts</button>
+        <button class="tab active" data-panel="panelSmtp">📧 Email Senders</button>
         <button class="tab" data-panel="panelGroq">🔑 AI Keys</button>
         <button class="tab" data-panel="panelServices">⚙️ Services</button>
         <button class="tab" data-panel="panelGeneral">🛠 General</button>
@@ -35,13 +35,24 @@
       <div class="settings-panel" id="panelSmtp">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;">
           <div>
-            <h2 style="font-size:1.05rem;font-weight:700;">SMTP Accounts</h2>
-            <p style="font-size:0.78rem;color:var(--text-muted);">Configure email sending accounts for outreach.</p>
+            <h2 style="font-size:1.05rem;font-weight:700;">Email Senders</h2>
+            <p style="font-size:0.78rem;color:var(--text-muted);">Add a sending account. Brevo (HTTP API) is recommended — it works even when SMTP ports are blocked.</p>
           </div>
           <button class="btn btn-primary btn-sm" onclick="Settings.openAddSmtp()">+ Add Account</button>
         </div>
         <div id="smtpList">
           <div class="skeleton skeleton-card" style="height:80px;margin-bottom:0.75rem;"></div>
+        </div>
+
+        <div class="glass-card-static p-5 mt-6">
+          <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:0.5rem;">ℹ️ Recommended: Brevo (free 300 emails/day)</h3>
+          <p style="font-size:0.8rem;color:var(--text-secondary);line-height:1.6;">
+            Brevo sends over its HTTPS API, so it works reliably on cloud hosts (no blocked SMTP ports).
+            1) Create a free account at <a href="https://www.brevo.com" target="_blank" style="color:var(--primary-light);">brevo.com</a>,
+            2) verify a sender email (Senders &amp; IP → Senders),
+            3) create an API key (SMTP &amp; API → API Keys, starts with <code>xkeysib-</code>),
+            then add it here with that verified sender email.
+          </p>
         </div>
       </div>
 
@@ -218,11 +229,11 @@
     </main>
   </div>
 
-  <!-- SMTP Modal -->
+  <!-- SMTP / Sender Modal -->
   <div class="modal-overlay" id="smtpModal">
     <div class="modal" style="max-width:520px;">
       <div class="modal-header">
-        <h3 id="smtpModalTitle">📧 Add SMTP Account</h3>
+        <h3 id="smtpModalTitle">📧 Add Email Sender</h3>
         <button class="modal-close">✕</button>
       </div>
       <form id="smtpForm">
@@ -231,19 +242,20 @@
           <div class="form-group">
             <label class="form-label" for="smtpProvider">Provider *</label>
             <select id="smtpProvider" class="form-select" required>
-              <option value="gmail">Gmail</option>
-              <option value="outlook">Outlook / Hotmail</option>
+              <option value="brevo">Brevo (HTTP API — recommended)</option>
+              <option value="gmail">Gmail (App Password)</option>
               <option value="custom">Custom SMTP</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="smtpEmail">Email Address *</label>
-            <input type="email" id="smtpEmail" class="form-input" placeholder="your-email@gmail.com" required>
+            <label class="form-label" for="smtpEmail" id="smtpEmailLabel">Sender Email *</label>
+            <input type="email" id="smtpEmail" class="form-input" placeholder="verified-sender@yourdomain.com" required>
           </div>
           <div class="form-group">
-            <label class="form-label" for="smtpPassword">App Password *</label>
-            <input type="password" id="smtpPassword" class="form-input" placeholder="App password (not your login password)" required>
+            <label class="form-label" for="smtpPassword" id="smtpPasswordLabel">Brevo API Key *</label>
+            <input type="password" id="smtpPassword" class="form-input" placeholder="xkeysib-..." required>
           </div>
+          <div id="smtpProviderHint" style="font-size:0.72rem;color:var(--text-secondary);background:rgba(22,163,74,0.06);border:1px solid rgba(22,163,74,0.15);border-radius:0.5rem;padding:0.6rem 0.75rem;margin-bottom:0.85rem;"></div>
           <div id="smtpCustomFields" style="display:none;">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div class="form-group">
@@ -258,7 +270,7 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="smtpDailyLimit">Daily Send Limit</label>
-            <input type="number" id="smtpDailyLimit" class="form-input" value="500" min="1" max="10000">
+            <input type="number" id="smtpDailyLimit" class="form-input" value="300" min="1" max="10000">
           </div>
         </div>
         <div class="modal-footer">
@@ -304,17 +316,6 @@
       document.getElementById('sidebarContainer').innerHTML = getSidebarHTML();
       App.init();
       Settings.init();
-
-      // Toggle custom SMTP fields based on provider selection
-      const providerSelect = document.getElementById('smtpProvider');
-      if (providerSelect) {
-        providerSelect.addEventListener('change', () => {
-          const customFields = document.getElementById('smtpCustomFields');
-          if (customFields) {
-            customFields.style.display = providerSelect.value === 'custom' ? 'block' : 'none';
-          }
-        });
-      }
     });
   </script>
 </body>
