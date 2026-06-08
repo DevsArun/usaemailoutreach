@@ -1,6 +1,10 @@
 const { callGroq } = require('../config/groq');
 const logger = require('../utils/logger');
 
+// Signature used to sign every outreach email.
+const SENDER_NAME = process.env.OUTREACH_SENDER_NAME || 'DevsArun';
+const SENDER_TITLE = process.env.OUTREACH_SENDER_TITLE || 'Full Stack Developer';
+
 const SERVICE_CATALOG = {
   website_dev: { name: 'Website Development', keywords: ['no website', 'poor website', 'outdated'] },
   website_redesign: { name: 'Website Redesign', keywords: ['slow', 'not mobile friendly', 'poor design'] },
@@ -94,77 +98,135 @@ ${reviewsSummary || 'No reviews available'}`,
 }
 
 async function generateOutreachEmail(business, reviews, websiteAnalysis, aiAnalysis) {
-  const topPainPoints = (aiAnalysis.pain_points || [])
-    .filter(p => p.severity === 'high')
-    .slice(0, 3)
-    .map(p => p.issue);
+  // ── Build rich, business-specific context for maximum personalization ──
+  const websiteFindings = [];
+  if (websiteAnalysis && websiteAnalysis.url) {
+    if (!websiteAnalysis.has_booking) websiteFindings.push('no online booking/appointment system');
+    if (!websiteAnalysis.has_whatsapp) websiteFindings.push('no WhatsApp contact option');
+    if (!websiteAnalysis.has_chatbot && !websiteAnalysis.has_live_chat) websiteFindings.push('no live chat / chatbot');
+    if (!websiteAnalysis.has_crm) websiteFindings.push('no visible lead-capture/CRM');
+    if (!websiteAnalysis.has_lead_capture) websiteFindings.push('no lead-capture form');
+    if (websiteAnalysis.mobile_friendly === false) websiteFindings.push('website is not mobile-friendly');
+    if (websiteAnalysis.ssl === false) websiteFindings.push('no SSL/secure connection');
+    if (websiteAnalysis.page_speed && websiteAnalysis.page_speed < 50) websiteFindings.push('slow page-load speed');
+  } else {
+    websiteFindings.push('no website found online (huge missed-opportunity for a business this size)');
+  }
 
-  const topServices = (aiAnalysis.recommended_services || [])
+  const complaintQuotes = (reviews || [])
+    .filter(r => r.text && r.rating && r.rating <= 3)
+    .slice(0, 4)
+    .map(r => `- (${r.rating}★) "${r.text.slice(0, 220)}"`);
+  const praiseQuotes = (reviews || [])
+    .filter(r => r.text && r.rating && r.rating >= 4)
     .slice(0, 2)
-    .map(s => s.service);
+    .map(r => `- (${r.rating}★) "${r.text.slice(0, 160)}"`);
 
-  const reviewComplaints = reviews
-    .filter(r => r.rating <= 3)
-    .slice(0, 3)
-    .map(r => r.text)
-    .filter(Boolean);
+  const painPoints = (aiAnalysis.pain_points || [])
+    .map(p => (p && (p.issue || p)) || '')
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('; ');
+
+  const services = (aiAnalysis.recommended_services || [])
+    .map(s => (s && (s.service || s)) || '')
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' and ');
 
   const prompt = [
     {
       role: 'system',
-      content: `You are a professional business outreach specialist. Write a cold email that:
-- Is highly personalized based on the business's specific problems
-- References specific review complaints or website issues naturally
-- Proposes a solution without being salesy
-- Is brief (under 120 words)
-- Uses the business owner's first name if available, otherwise use a professional greeting
-- Does NOT include portfolio links
-- Does NOT mention "I am a web developer" or similar
-- Does NOT dump services list
-- Focuses entirely on the business's problem and a solution
-- Ends with a soft call to action (question, not demand)
-- Has a natural, human tone
+      content: `You are ${SENDER_NAME}, a professional ${SENDER_TITLE}. Write a personalized cold outreach email to a local business owner that reads like a thoughtful human wrote it AFTER actually researching their business.
 
-Return ONLY a JSON object with "subject" and "body" fields. No other text.`,
+FORMATTING IS CRITICAL. The "body" MUST use real line breaks and be split into short sections separated by a blank line. Follow this EXACT structure (keep the blank lines):
+
+Hi <OwnerFirstName>, (or "Hi there," if no name)
+
+<Paragraph 1: 1-2 sentences referencing something specific and genuine about THEIR business — their Google rating and what customers praise in the reviews.>
+
+<Paragraph 2: 1-2 sentences naming a concrete gap you noticed from their reviews or website, and why it quietly costs them customers.>
+
+<Paragraph 3: 1-2 sentences proposing ONE specific thing you can build for them and the real outcome it delivers (more booked jobs, fewer missed enquiries, more reviews).>
+
+<One short line: a direct, friendly question asking if they're interested — e.g. "If this sounds useful, can I send a quick 1-minute demo?">
+
+Best regards,
+${SENDER_NAME}
+${SENDER_TITLE}
+
+STYLE: warm, professional, confident, specific to THIS business. 110-170 words. Natural human tone. NO "I hope this finds you well", NO buzzwords, NO pricing, NO links, NO bullet points.
+
+Return ONLY valid JSON: {"subject":"...","body":"..."} — and inside the body string use \\n for line breaks and \\n\\n between paragraphs. The subject must be specific to the business (not generic).`,
     },
     {
       role: 'user',
-      content: `Business: ${business.name}
-Owner: ${business.owner_name || 'Business Owner'}
-Category: ${business.category || 'Local Business'}
+      content: `BUSINESS: ${business.name}
+Owner: ${business.owner_name || '(unknown — use a natural greeting)'}
+Category: ${business.category || 'local business'}
 Location: ${business.address || ''}
-Rating: ${business.rating || 'N/A'}
+Google rating: ${business.rating || 'N/A'} from ${business.reviews_count || 0} reviews
+Website: ${business.website || 'NONE'}
 
-Key Pain Points:
-${topPainPoints.join('\n') || 'General business improvement opportunities'}
+WEBSITE / DIGITAL GAPS:
+${websiteFindings.map(f => '- ' + f).join('\n')}
 
-Customer Complaints from Reviews:
-${reviewComplaints.join('\n') || 'No specific complaints found'}
+WHAT UNHAPPY CUSTOMERS SAY (use these to personalize, paraphrase — don't quote verbatim in full):
+${complaintQuotes.join('\n') || '(no negative reviews available)'}
 
-Recommended Solutions:
-${topServices.join(', ') || 'Business automation and optimization'}
+WHAT HAPPY CUSTOMERS SAY:
+${praiseQuotes.join('\n') || '(none)'}
 
-Email Angle: ${aiAnalysis.email_angle || 'Focus on improving business efficiency'}`,
+AI-IDENTIFIED PAIN POINTS: ${painPoints || 'general growth opportunities'}
+BEST-FIT SOLUTION TO PITCH: ${services || 'a tailored website/automation improvement'}
+KEY ANGLE: ${aiAnalysis.email_angle || 'help them capture and convert more local leads'}`,
     },
   ];
 
   try {
     const response = await callGroq(prompt, { temperature: 0.8, maxTokens: 1024 });
     const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const result = JSON.parse(jsonMatch[0]);
-      return {
-        subject: result.subject,
-        body: result.body,
+    if (!jsonMatch) throw new Error('No valid JSON in response');
+
+    let result;
+    try {
+      result = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      // Models often emit literal newlines inside the JSON string (invalid
+      // JSON). Extract the fields manually and unescape.
+      const subj = jsonMatch[0].match(/"subject"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const bod = jsonMatch[0].match(/"body"\s*:\s*"([\s\S]*?)"\s*\}\s*$/);
+      if (!subj || !bod) throw e;
+      result = {
+        subject: subj[1].replace(/\\"/g, '"'),
+        body: bod[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'),
       };
     }
-    throw new Error('No valid JSON in response');
+    if (!result.subject || !result.body) throw new Error('AI response missing subject/body');
+
+    let body = result.body.trim();
+
+    // ── Normalize formatting so the email always reads cleanly ──
+    // 1) Greeting on its own line (with a blank line after it).
+    body = body.replace(/^(hi\b[^,\n]{0,40},|hello\b[^,\n]{0,40},|hey\b[^,\n]{0,40},)[ \t]+/i, '$1\n\n');
+    // 2) Replace any trailing sign-off the model added with a clean signature block.
+    const signoffRe = /(best\s+regards|warm\s+regards|kind\s+regards|regards|sincerely|cheers|thanks|thank\s+you)\b/gi;
+    let lastIdx = -1, mm;
+    while ((mm = signoffRe.exec(body)) !== null) lastIdx = mm.index;
+    if (lastIdx !== -1 && lastIdx >= body.length - 110) {
+      body = body.slice(0, lastIdx).trim();
+    }
+    body = `${body}\n\nBest regards,\n${SENDER_NAME}\n${SENDER_TITLE}`;
+    // 3) Collapse any 3+ consecutive newlines down to a clean paragraph break.
+    body = body.replace(/\n{3,}/g, '\n\n');
+
+    return { subject: result.subject.trim(), body };
   } catch (error) {
-    logger.error('Email generation failed:', error.message);
-    return {
-      subject: `Quick idea for ${business.name}`,
-      body: `Hi,\n\nI noticed some opportunities to improve how ${business.name} captures and manages incoming leads online.\n\nWould you be open to hearing a quick idea?\n\nBest regards`,
-    };
+    // No generic fallback: if AI is unavailable (e.g. no Groq key) we do NOT
+    // create a templated email. The caller will skip creating a draft so that
+    // every saved outreach email is genuinely AI-personalized.
+    logger.warn(`Outreach generation skipped — AI unavailable: ${error.message}`);
+    return null;
   }
 }
 

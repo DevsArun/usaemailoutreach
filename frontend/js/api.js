@@ -134,6 +134,7 @@ const API = (() => {
       list: () => request('GET', '/campaigns'),
       get: (id) => request('GET', `/campaigns/${id}`),
       create: (data) => request('POST', '/campaigns', data),
+      import: (data) => request('POST', '/campaigns/import', data),
       start: (id) => request('PUT', `/campaigns/${id}/start`),
       pause: (id) => request('PUT', `/campaigns/${id}/pause`),
       stop: (id) => request('PUT', `/campaigns/${id}/stop`),
@@ -146,6 +147,9 @@ const API = (() => {
       list: (campaignId) => request('GET', campaignId ? `/businesses?campaign_id=${campaignId}` : '/businesses'),
       get: (id) => request('GET', `/businesses/${id}`),
       updateStage: (id, stage) => request('PUT', `/businesses/${id}/stage`, { stage }),
+      delete: (id) => request('DELETE', `/businesses/${id}`),
+      bulkDelete: (ids) => request('POST', '/businesses/bulk-delete', { ids }),
+      verifyEmails: (campaignId) => request('POST', '/businesses/verify-emails', campaignId ? { campaign_id: campaignId } : {}),
     },
 
     // ---- Outreach ----
@@ -161,6 +165,7 @@ const API = (() => {
     replies: {
       list: () => request('GET', '/replies'),
       respond: (id, body) => request('POST', `/replies/${id}/respond`, { body }),
+      sync: () => request('POST', '/replies/sync'),
     },
 
     // ---- Pipeline ----

@@ -1,13 +1,25 @@
+/* ============================================
+   LeadForge AI — Queue Manager
+   Uses BullMQ + Redis when REDIS_URL is configured and
+   reachable. Otherwise transparently falls back to
+   in-process job execution so the platform works fully
+   even without a Redis instance (e.g. single-container
+   Hugging Face Spaces deployments).
+   ============================================ */
+
 const { Queue } = require('bullmq');
 const { createRedisConnection } = require('../config/redis');
 const logger = require('../utils/logger');
+const { processJob } = require('./processors');
 
-let campaignQueue = null;
-let analyzeQueue = null;
-let verifyQueue = null;
-let emailQueue = null;
-let outreachQueue = null;
-let followupQueue = null;
+const QUEUE_NAMES = [
+  'campaign-queue',
+  'analyze-queue',
+  'verify-queue',
+  'email-queue',
+  'outreach-queue',
+  'followup-queue',
+];
 
 const defaultJobOptions = {
   attempts: 3,
@@ -16,28 +28,121 @@ const defaultJobOptions = {
   removeOnFail: { count: 500 },
 };
 
+const queues = {};
+let sharedConnection = null;
+let useRedis = false;
+
+/**
+ * Initialise the queue subsystem. Tries Redis first; on any failure
+ * (no URL, unreachable, auth error) it falls back to in-process mode.
+ * This function NEVER throws — the app must always start.
+ */
 async function initQueues() {
-  const connection = createRedisConnection();
+  const url = (process.env.REDIS_URL || '').trim();
 
-  campaignQueue = new Queue('campaign-queue', { connection, defaultJobOptions });
-  analyzeQueue = new Queue('analyze-queue', { connection, defaultJobOptions });
-  verifyQueue = new Queue('verify-queue', { connection, defaultJobOptions });
-  emailQueue = new Queue('email-queue', { connection, defaultJobOptions });
-  outreachQueue = new Queue('outreach-queue', { connection, defaultJobOptions });
-  followupQueue = new Queue('followup-queue', { connection, defaultJobOptions });
+  if (!url) {
+    useRedis = false;
+    logger.warn('REDIS_URL not configured. Running jobs in-process (no Redis required).');
+    return;
+  }
 
-  logger.info('All BullMQ queues initialized.');
+  let connection = null;
+  try {
+    connection = createRedisConnection();
+
+    // IMPORTANT: keep a permanent 'error' listener attached at all times.
+    // ioredis is an EventEmitter — an 'error' event with no listener would
+    // crash the whole process. Since we keep retrying in the background,
+    // errors can fire repeatedly, so this noop guard must persist.
+    connection.on('error', (err) => {
+      logger.debug(`Redis error: ${err.message}`);
+    });
+
+    // Verify the connection is actually usable before committing to it.
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Redis connection timeout')), 8000);
+      const onReady = () => { cleanup(); resolve(); };
+      const onError = (err) => { cleanup(); reject(err); };
+      function cleanup() {
+        clearTimeout(timer);
+        connection.removeListener('ready', onReady);
+        connection.removeListener('error', onError);
+      }
+      connection.once('ready', onReady);
+      connection.once('error', onError);
+    });
+
+    sharedConnection = connection;
+    for (const name of QUEUE_NAMES) {
+      queues[name] = new Queue(name, { connection: sharedConnection, defaultJobOptions });
+    }
+    useRedis = true;
+    logger.info('BullMQ queues initialised (Redis connected).');
+  } catch (err) {
+    useRedis = false;
+    // Stop the failed connection from retrying forever in the background.
+    if (connection) {
+      try { connection.disconnect(); } catch (e) { /* ignore */ }
+    }
+    logger.warn(`Redis unavailable (${err.message}). Falling back to in-process job execution.`);
+  }
 }
 
-function getCampaignQueue() { return campaignQueue; }
-function getAnalyzeQueue() { return analyzeQueue; }
-function getVerifyQueue() { return verifyQueue; }
-function getEmailQueue() { return emailQueue; }
-function getOutreachQueue() { return outreachQueue; }
-function getFollowupQueue() { return followupQueue; }
+/**
+ * Enqueue a job. Uses BullMQ when Redis is available, otherwise runs
+ * the job in-process on the next tick (non-blocking, fire-and-forget
+ * with full error handling). Always resolves with a job descriptor so
+ * callers never crash on a null queue.
+ */
+async function enqueue(queueName, jobName, data = {}, opts = {}) {
+  if (useRedis && queues[queueName]) {
+    return queues[queueName].add(jobName, data, { ...defaultJobOptions, ...opts });
+  }
+
+  // ── In-process fallback ──────────────────────────────────────────
+  setImmediate(() => {
+    processJob(queueName, jobName, data).catch(async (err) => {
+      logger.error(`In-process job failed [${queueName}/${jobName}]: ${err.message}`);
+      // If this was a campaign job, surface the failure on the campaign record.
+      if (data && data.campaignId) {
+        try {
+          const { Campaign } = require('../models');
+          await Campaign.update(
+            { status: 'failed', error_message: err.message },
+            { where: { id: data.campaignId } }
+          );
+        } catch (e) {
+          logger.error('Could not update failed campaign:', e.message);
+        }
+      }
+    });
+  });
+
+  return { id: `inproc-${queueName}-${Date.now()}`, inProcess: true };
+}
+
+function isUsingRedis() {
+  return useRedis;
+}
+
+function getSharedConnection() {
+  return sharedConnection;
+}
+
+// Backwards-compatible accessors (return the BullMQ queue or null).
+function getCampaignQueue() { return queues['campaign-queue'] || null; }
+function getAnalyzeQueue() { return queues['analyze-queue'] || null; }
+function getVerifyQueue() { return queues['verify-queue'] || null; }
+function getEmailQueue() { return queues['email-queue'] || null; }
+function getOutreachQueue() { return queues['outreach-queue'] || null; }
+function getFollowupQueue() { return queues['followup-queue'] || null; }
 
 module.exports = {
   initQueues,
+  enqueue,
+  isUsingRedis,
+  getSharedConnection,
+  QUEUE_NAMES,
   getCampaignQueue,
   getAnalyzeQueue,
   getVerifyQueue,

@@ -136,6 +136,20 @@ async function connectServices() {
           if (resetCount > 0) logger.info(`Reset ${resetCount} stuck campaigns to 'failed'`);
         } catch(e) { logger.warn('Could not reset stuck campaigns:', e.message); }
 
+        // Load user-added Groq API keys from the database into the rotation
+        // manager (it only auto-loads ENV keys at boot, so DB keys would
+        // otherwise be lost after every restart and break all AI features).
+        try {
+          const { GroqKey } = require('./models');
+          const { groqKeyManager } = require('./config/groq');
+          const dbKeys = await GroqKey.findAll({ where: { status: 'active' } });
+          let loaded = 0;
+          dbKeys.forEach(k => {
+            if (k.api_key && k.api_key.startsWith('gsk_')) { groqKeyManager.addKey(k.api_key); loaded++; }
+          });
+          if (loaded > 0) logger.info(`Loaded ${loaded} Groq key(s) from database`);
+        } catch(e) { logger.warn('Could not load Groq keys from DB:', e.message); }
+
         break;
       } catch (err) {
         logger.error(`❌ DB attempt ${attempt}/30: ${err.message}`);
@@ -146,28 +160,47 @@ async function connectServices() {
     logger.error('❌ Models module error:', err.message);
   }
 
-  // Redis + BullMQ
+  // Redis + BullMQ (optional — falls back to in-process jobs if unavailable)
   try {
-    const { initQueues } = require('./queues');
+    const { initQueues, isUsingRedis } = require('./queues');
     const { initWorkers } = require('./queues/workers');
-    for (let attempt = 1; attempt <= 30; attempt++) {
-      try {
-        await initQueues();
-        await initWorkers();
-        logger.info(`✅ Queues & Workers started (attempt ${attempt})`);
-        appStatus.redis = true;
-        break;
-      } catch (err) {
-        logger.error(`❌ Queue attempt ${attempt}/30: ${err.message}`);
-        await new Promise(r => setTimeout(r, 5000));
-      }
+
+    await initQueues();
+    if (isUsingRedis()) {
+      await initWorkers();
+      appStatus.redis = true;
+      logger.info('✅ Queues & Workers started (Redis mode)');
+    } else {
+      appStatus.redis = false;
+      logger.info('✅ Job runner ready (in-process mode, no Redis required)');
     }
   } catch (err) {
     logger.error('❌ Queues module error:', err.message);
+    logger.warn('Continuing in in-process job mode.');
   }
 
   appStatus.ready = true;
   logger.info('🚀 All services ready!');
+
+  // ── Inbound reply poller (IMAP) ────────────────────────────────────
+  // Periodically scans configured mailboxes for replies to outreach
+  // emails, auto-classifies them, and advances the pipeline. Runs in
+  // process (no Redis required) and fails soft.
+  try {
+    const { syncAllReplies } = require('./services/imapService');
+    const intervalMin = parseInt(process.env.REPLY_POLL_INTERVAL_MIN) || 5;
+
+    const runReplySync = () => {
+      syncAllReplies().catch(err => logger.warn('Reply sync error:', err.message));
+    };
+
+    // First run shortly after startup, then on an interval.
+    setTimeout(runReplySync, 60 * 1000);
+    setInterval(runReplySync, intervalMin * 60 * 1000);
+    logger.info(`📥 Reply poller active (every ${intervalMin} min)`);
+  } catch (err) {
+    logger.warn('Reply poller not started:', err.message);
+  }
 }
 
 // ─── SIGNAL HANDLERS ─────────────────────────────────────────────────

@@ -41,13 +41,16 @@ const Analytics = (() => {
   }
 
   function renderOverviewStats(data) {
+    const sent = data.totalEmailsSent ?? data.totalEmails ?? data.emails_sent ?? 0;
+    const won = data.dealsWon ?? 0;
+    const conversion = data.conversion_rate ?? (sent > 0 ? Math.round((won / sent) * 100) : 0);
     const stats = [
-      { id: 'analyticLeads', value: data.totalBusinesses || data.total_leads || 0 },
-      { id: 'analyticEmails', value: data.totalEmails || data.emails_sent || 0 },
-      { id: 'analyticOpenRate', value: data.open_rate || 0, suffix: '%' },
-      { id: 'analyticReplyRate', value: data.reply_rate || 0, suffix: '%' },
-      { id: 'analyticConversion', value: data.conversion_rate || 0, suffix: '%' },
-      { id: 'analyticMeetings', value: data.meetings_scheduled || 0 },
+      { id: 'analyticLeads', value: data.totalBusinesses ?? data.total_leads ?? 0 },
+      { id: 'analyticEmails', value: sent },
+      { id: 'analyticOpenRate', value: data.openRate ?? data.open_rate ?? 0, suffix: '%' },
+      { id: 'analyticReplyRate', value: data.replyRate ?? data.reply_rate ?? 0, suffix: '%' },
+      { id: 'analyticConversion', value: conversion, suffix: '%' },
+      { id: 'analyticMeetings', value: data.meetingsBooked ?? data.meetings_scheduled ?? 0 },
     ];
 
     stats.forEach(s => {
@@ -101,8 +104,14 @@ const Analytics = (() => {
     if (charts.emailsOverTime) charts.emailsOverTime.destroy();
 
     const c = getChartColors();
-    const labels = data.emailsOverTime?.labels || data.emails_over_time?.labels || ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6', 'Week 7', 'Week 8'];
-    const values = data.emailsOverTime?.values || data.emails_over_time?.values || [12, 28, 45, 62, 78, 95, 110, 128];
+    // Backend returns an array of { date, count }. Map it to chart shape.
+    const rows = Array.isArray(data.emailsOverTime) ? data.emailsOverTime : [];
+    const labels = rows.length
+      ? rows.map(r => Utils.formatDate(r.date))
+      : (data.emailsOverTime?.labels || []);
+    const values = rows.length
+      ? rows.map(r => parseInt(r.count) || 0)
+      : (data.emailsOverTime?.values || []);
 
     charts.emailsOverTime = new Chart(ctx, {
       type: 'line',
@@ -151,9 +160,13 @@ const Analytics = (() => {
     if (charts.openReplyRate) charts.openReplyRate.destroy();
 
     const c = getChartColors();
-    const labels = data.campaign_rates?.labels || ['Campaign 1', 'Campaign 2', 'Campaign 3', 'Campaign 4', 'Campaign 5'];
-    const openRates = data.campaign_rates?.open_rates || [72, 65, 80, 58, 74];
-    const replyRates = data.campaign_rates?.reply_rates || [18, 22, 32, 12, 25];
+    // Use real per-campaign data (Leads vs Replies) from topPerformingCampaigns.
+    const camps = Array.isArray(data.topPerformingCampaigns) ? data.topPerformingCampaigns : [];
+    const labels = camps.length
+      ? camps.map(c2 => Utils.truncate(c2.query || `Campaign ${c2.id}`, 18))
+      : [];
+    const leadCounts = camps.map(c2 => parseInt(c2.business_count) || 0);
+    const replyCounts = camps.map(c2 => parseInt(c2.reply_count) || 0);
 
     charts.openReplyRate = new Chart(ctx, {
       type: 'bar',
@@ -161,16 +174,16 @@ const Analytics = (() => {
         labels,
         datasets: [
           {
-            label: 'Open Rate %',
-            data: openRates,
+            label: 'Leads',
+            data: leadCounts,
             backgroundColor: c.bg1,
             borderColor: c.primary,
             borderWidth: 1,
             borderRadius: 6,
           },
           {
-            label: 'Reply Rate %',
-            data: replyRates,
+            label: 'Replies',
+            data: replyCounts,
             backgroundColor: c.bg2,
             borderColor: c.success,
             borderWidth: 1,
@@ -205,9 +218,15 @@ const Analytics = (() => {
     if (!ctx) return;
     if (charts.leadSources) charts.leadSources.destroy();
 
-    const labels = data.leadSourceDistribution?.labels || data.lead_sources?.labels || ['Google Maps', 'Website Scrape', 'LinkedIn', 'Referral', 'Manual'];
-    const values = data.leadSourceDistribution?.values || data.lead_sources?.values || [42, 24, 18, 10, 6];
-    const colors = ['#16a34a', '#059669', '#3b82f6', '#f59e0b', '#ef4444'];
+    // Backend returns an array of { source, count }.
+    const rows = Array.isArray(data.leadSourceDistribution) ? data.leadSourceDistribution : [];
+    const labels = rows.length
+      ? rows.map(r => (r.source || 'Unknown'))
+      : (data.leadSourceDistribution?.labels || []);
+    const values = rows.length
+      ? rows.map(r => parseInt(r.count) || 0)
+      : (data.leadSourceDistribution?.values || []);
+    const colors = ['#16a34a', '#059669', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
     charts.leadSources = new Chart(ctx, {
       type: 'doughnut',
@@ -247,7 +266,17 @@ const Analytics = (() => {
     if (charts.funnel) charts.funnel.destroy();
 
     const stages = ['Discovered', 'Analyzed', 'Email Sent', 'Opened', 'Replied', 'Interested', 'Meeting', 'Proposal', 'Won'];
-    const values = data.pipelineFunnel?.values || data.funnel?.values || [500, 420, 350, 245, 85, 52, 28, 15, 8];
+    const stageKeys = ['discovered', 'analyzed', 'email_sent', 'opened', 'replied', 'interested', 'meeting_scheduled', 'proposal_sent', 'won'];
+    // Backend returns an array of { pipeline_stage, count }. Map to fixed order.
+    const funnelRows = Array.isArray(data.pipelineFunnel) ? data.pipelineFunnel : [];
+    let values;
+    if (funnelRows.length) {
+      const byStage = {};
+      funnelRows.forEach(r => { byStage[r.pipeline_stage] = parseInt(r.count) || 0; });
+      values = stageKeys.map(k => byStage[k] || 0);
+    } else {
+      values = data.pipelineFunnel?.values || data.funnel?.values || stageKeys.map(() => 0);
+    }
 
     const gradient = values.map((_, i) => {
       const ratio = i / (stages.length - 1);
@@ -304,8 +333,8 @@ const Analytics = (() => {
     if (charts.scoreDist) charts.scoreDist.destroy();
 
     const c = getChartColors();
-    const labels = data.score_distribution?.labels || ['0-20', '20-40', '40-60', '60-80', '80-100'];
-    const values = data.score_distribution?.values || [15, 35, 85, 120, 65];
+    const labels = data.scoreDistribution?.labels || data.score_distribution?.labels || ['0-20', '20-40', '40-60', '60-80', '80-100'];
+    const values = data.scoreDistribution?.values || data.score_distribution?.values || [0, 0, 0, 0, 0];
 
     charts.scoreDist = new Chart(ctx, {
       type: 'line',

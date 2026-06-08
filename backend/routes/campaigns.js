@@ -3,7 +3,8 @@ const { Campaign, Business, OutreachEmail, AnalyticsEvent } = require('../models
 const authenticate = require('../middleware/auth');
 const { campaignValidation, paginationValidation } = require('../utils/validators');
 const { parseSearchQuery, buildPaginationMeta } = require('../utils/helpers');
-const { getCampaignQueue } = require('../queues');
+const { enqueue } = require('../queues');
+const { importBusinesses } = require('../services/campaignService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -130,6 +131,75 @@ router.post('/', campaignValidation, async (req, res, next) => {
   }
 });
 
+router.post('/import', async (req, res, next) => {
+  try {
+    const { query, campaign_id, businesses } = req.body;
+
+    if (!Array.isArray(businesses) || businesses.length === 0) {
+      return res.status(400).json({ success: false, message: 'Provide a non-empty "businesses" array.' });
+    }
+
+    // Use an existing campaign or create a new one for the imported leads.
+    let campaign;
+    if (campaign_id) {
+      campaign = await Campaign.findOne({ where: { id: campaign_id, user_id: req.user.id } });
+      if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found.' });
+    } else {
+      const q = (query || 'Imported Leads').toString().trim();
+      const { keyword, location } = parseSearchQuery(q);
+      campaign = await Campaign.create({
+        user_id: req.user.id,
+        query: q,
+        keyword,
+        location,
+        settings: {
+          sources: ['google_maps_import'],
+          max_results: businesses.length,
+          scrape_reviews: false,
+          crawl_websites: true,
+          find_emails: true,
+          verify_emails: true,
+          generate_outreach: true,
+          daily_email_limit: parseInt(process.env.DEFAULT_DAILY_EMAIL_LIMIT) || 50,
+        },
+      });
+    }
+
+    const created = await importBusinesses(campaign.id, businesses);
+
+    // Kick off the rest of the pipeline (website crawl, email discovery +
+    // verification, AI analysis, outreach) — discovery is skipped.
+    await campaign.update({
+      status: 'running',
+      started_at: new Date(),
+      error_message: null,
+      progress: { ...campaign.progress, current_stage: 'crawling_websites', businesses_found: created },
+    });
+
+    await enqueue('campaign-queue', 'process-campaign', {
+      campaignId: campaign.id,
+      userId: req.user.id,
+      skipDiscovery: true,
+    });
+
+    await AnalyticsEvent.create({
+      campaign_id: campaign.id,
+      event_type: 'leads_imported',
+      metadata: { imported: created },
+    }).catch(e => logger.warn(`Could not log leads_imported: ${e.message}`));
+
+    logger.info(`Imported ${created} businesses into campaign ${campaign.id} and started processing.`);
+
+    res.status(201).json({
+      success: true,
+      message: `Imported ${created} businesses. Processing started.`,
+      data: { campaign, imported: created },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.put('/:id/start', async (req, res, next) => {
   try {
     const campaign = await Campaign.findOne({
@@ -154,8 +224,7 @@ router.put('/:id/start', async (req, res, next) => {
       },
     });
 
-    const campaignQueue = getCampaignQueue();
-    await campaignQueue.add('process-campaign', {
+    await enqueue('campaign-queue', 'process-campaign', {
       campaignId: campaign.id,
       userId: req.user.id,
     }, {
@@ -168,7 +237,7 @@ router.put('/:id/start', async (req, res, next) => {
     await AnalyticsEvent.create({
       campaign_id: campaign.id,
       event_type: 'campaign_started',
-    });
+    }).catch(e => logger.warn(`Could not log campaign_started: ${e.message}`));
 
     logger.info(`Campaign started: ${campaign.id}`);
 

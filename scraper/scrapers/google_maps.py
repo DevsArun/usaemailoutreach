@@ -1,10 +1,17 @@
-"""Google Maps scraper using Playwright with stealth."""
+"""Google Maps scraper using Playwright.
+
+Reliable approach (proven in production): instead of clicking each card in
+the results feed, we collect every ``/maps/place`` link first, then navigate
+to each listing URL directly and extract details + recent reviews with a
+single page.evaluate() call using stable Google Maps selectors.
+"""
 
 from __future__ import annotations
 
-import asyncio
+import os
 import re
-from urllib.parse import quote_plus
+import time
+from urllib.parse import quote
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
@@ -16,52 +23,96 @@ from .base import BaseScraper, BusinessData, ReviewData
 class GoogleMapsScraper(BaseScraper):
     source_name = "google_maps"
 
-    MAPS_SEARCH_URL = "https://www.google.com/maps/search/{query}"
+    MAPS_SEARCH_URL = "https://www.google.com/maps/search/{query}?hl=en&gl=us"
 
+    # ── public API ──────────────────────────────────────────────────────
     async def scrape_businesses(
         self, query: str, *, max_results: int = 50
     ) -> list[BusinessData]:
         results: list[BusinessData] = []
         context = await self.browser.acquire()
         try:
-            page = await self.browser.new_stealth_page(context)
+            # Pre-set Google's consent cookie to bypass the cookie/consent wall
+            # that datacenter IPs (HF Spaces, Render, etc.) almost always hit —
+            # this is the usual reason "0 business links" are found.
             try:
-                url = self.MAPS_SEARCH_URL.format(query=quote_plus(query))
-                await page.goto(url, wait_until="domcontentloaded")
-                await random_delay(2, 4)
+                await context.add_cookies([
+                    {"name": "CONSENT", "value": "YES+cb.20240101-00-p0.en+FX+000",
+                     "domain": ".google.com", "path": "/"},
+                    {"name": "SOCS", "value": "CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjQwMTAxLjA0X3AwGgJlbiACGgYIgL...",
+                     "domain": ".google.com", "path": "/"},
+                ])
+            except Exception:
+                pass
 
-                # Accept cookies / consent if prompted
-                await self._dismiss_consent(page)
+            page = await self.browser.new_stealth_page(context)
+            # Block images / media to speed up navigation.
+            await self._block_heavy_resources(page)
+            try:
+                url = self.MAPS_SEARCH_URL.format(query=quote(query))
+                links = []
+                for attempt in range(2):
+                    try:
+                        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                    except PlaywrightTimeout:
+                        self.logger.warning("Maps load timed out (attempt %d)", attempt + 1)
+                    await page.wait_for_timeout(5_000)
+                    await self._dismiss_consent(page)
 
-                # Wait for the results feed to appear
-                feed_selector = 'div[role="feed"]'
-                try:
-                    await page.wait_for_selector(feed_selector, timeout=15_000)
-                except PlaywrightTimeout:
-                    self.logger.warning("Results feed not found – page layout may have changed")
-                    return results
+                    # Wait for the results feed / listings to actually appear.
+                    try:
+                        await page.wait_for_selector(
+                            'a[href*="/maps/place"], [role="feed"], div[role="article"]',
+                            timeout=20_000,
+                        )
+                    except Exception:
+                        self.logger.warning("Results feed did not appear within 20s (attempt %d)", attempt + 1)
 
-                # Scroll to load more results
-                results_loaded = await self._scroll_results(page, feed_selector, max_results)
-                self.logger.info("Loaded %d result cards", results_loaded)
+                    await self._scroll_results(page, scrolls=8)
 
-                # Gather listing links
-                cards = await page.query_selector_all(f'{feed_selector} a[href*="/maps/place/"]')
-                cards = cards[:max_results]
+                    links = await page.eval_on_selector_all(
+                        'a[href*="/maps/place"]',
+                        "els => [...new Set(els.map(e => e.href))]",
+                    )
+                    if links:
+                        break
+                    self.logger.warning("No links on attempt %d; reloading...", attempt + 1)
+                    await page.wait_for_timeout(3_000)
 
-                for idx, card in enumerate(cards):
+                if not links:
+                    try:
+                        title = await page.title()
+                        self.logger.warning(
+                            "0 place links found. Likely datacenter-IP soft-block. "
+                            "title='%s' url='%s' — consider setting PROXY_URLS (residential proxy).",
+                            title, page.url,
+                        )
+                    except Exception:
+                        pass
+                self.logger.info("Found %d business links for '%s'", len(links), query)
+
+                # Time budget so we always return what we have rather than being
+                # cancelled (and losing everything) by the outer timeout.
+                budget = float(os.getenv("SCRAPE_TIME_BUDGET", "480"))
+                deadline = time.monotonic() + budget
+
+                for idx, link in enumerate(links[:max_results], 1):
                     if len(results) >= max_results:
                         break
+                    if time.monotonic() > deadline:
+                        self.logger.warning(
+                            "Scrape time budget reached; returning %d businesses", len(results)
+                        )
+                        break
                     try:
-                        biz = await self._extract_card(page, card)
-                        if biz and biz.name:
+                        biz = await self._scrape_place(page, link)
+                        if biz and biz.name and biz.name != "N/A":
                             results.append(biz)
+                            self.logger.info("  [%d] %s", idx, biz.name)
                     except Exception as exc:
-                        self.logger.debug("Error extracting card %d: %s", idx, exc)
-                    await random_delay(1, 2.5)
+                        self.logger.debug("Error on place %d: %s", idx, exc)
+                    await random_delay(0.8, 1.8)
 
-            except PlaywrightTimeout:
-                self.logger.warning("Timeout during Google Maps scraping")
             except Exception as exc:
                 self.logger.error("Google Maps scrape error: %s", exc, exc_info=True)
             finally:
@@ -78,47 +129,44 @@ class GoogleMapsScraper(BaseScraper):
         *,
         max_reviews: int = 20,
     ) -> list[ReviewData]:
+        """Standalone review scrape (kept for the /scrape/reviews endpoint).
+
+        The main pipeline now collects reviews inline during business scraping,
+        but this remains available for ad-hoc requests.
+        """
         reviews: list[ReviewData] = []
         context = await self.browser.acquire()
         try:
             page = await self.browser.new_stealth_page(context)
+            await self._block_heavy_resources(page)
             try:
-                query = f"{business_name} {location}"
-                url = self.MAPS_SEARCH_URL.format(query=quote_plus(query))
-                await page.goto(url, wait_until="domcontentloaded")
-                await random_delay(2, 4)
+                query = f"{business_name} {location}".strip()
+                url = self.MAPS_SEARCH_URL.format(query=quote(query))
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                except PlaywrightTimeout:
+                    pass
+                await page.wait_for_timeout(4_000)
                 await self._dismiss_consent(page)
 
-                # Click the first result to open the detail panel
-                first_link = await page.query_selector('a[href*="/maps/place/"]')
+                first_link = await page.query_selector('a[href*="/maps/place"]')
                 if first_link:
-                    await first_link.click()
-                    await random_delay(2, 3)
+                    href = await first_link.get_attribute("href")
+                    if href:
+                        await page.goto(href, wait_until="domcontentloaded", timeout=45_000)
+                        await page.wait_for_timeout(3_000)
 
-                # Click the reviews tab / "Reviews" button
-                reviews_btn = await page.query_selector('button[aria-label*="Reviews"], button[data-tab-index="1"]')
-                if reviews_btn:
-                    await reviews_btn.click()
-                    await random_delay(2, 3)
-
-                # Scroll the reviews container
-                review_container = await page.query_selector('div[class*="review"]')
-                if review_container:
-                    for _ in range(max_reviews // 3 + 1):
-                        await page.evaluate("(el) => el.scrollTop = el.scrollHeight", review_container)
-                        await random_delay(1, 2)
-
-                # Extract reviews
-                review_elements = await page.query_selector_all('div[data-review-id], div[class*="review"]')
-                for el in review_elements[:max_reviews]:
-                    try:
-                        review = await self._extract_review(el)
-                        if review and review.text:
-                            reviews.append(review)
-                    except Exception:
-                        pass
+                raw = await self._extract_reviews(page, max_reviews)
+                for r in raw:
+                    reviews.append(ReviewData(
+                        reviewer_name=r.get("reviewer_name", ""),
+                        rating=safe_int(r.get("rating", 0)),
+                        text=r.get("text", ""),
+                        date=r.get("date", ""),
+                        source=self.source_name,
+                    ))
             except Exception as exc:
-                self.logger.error("Google Maps review scrape error: %s", exc, exc_info=True)
+                self.logger.error("Review scrape error: %s", exc, exc_info=True)
             finally:
                 await page.close()
         finally:
@@ -126,152 +174,212 @@ class GoogleMapsScraper(BaseScraper):
 
         return reviews
 
-    # ---- internal helpers ----
+    # ── internal helpers ────────────────────────────────────────────────
+    async def _block_heavy_resources(self, page: Page) -> None:
+        async def _route(route):
+            if route.request.resource_type in ("image", "media", "font"):
+                try:
+                    await route.abort()
+                except Exception:
+                    pass
+            else:
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+
+        try:
+            await page.route("**/*", _route)
+        except Exception:
+            pass
 
     async def _dismiss_consent(self, page: Page) -> None:
-        """Try to dismiss Google consent / cookie banners."""
         for selector in [
             'button[aria-label="Accept all"]',
-            'form[action*="consent"] button',
-            "button:has-text('Accept')",
-            "button:has-text('Reject all')",
+            'button[aria-label="Reject all"]',
+            "form[action*='consent'] button",
+            "button:has-text('Accept all')",
+            "button:has-text('I agree')",
         ]:
             try:
                 btn = await page.query_selector(selector)
                 if btn:
                     await btn.click()
-                    await random_delay(0.5, 1)
+                    await page.wait_for_timeout(1_000)
                     break
             except Exception:
                 pass
 
-    async def _scroll_results(
-        self, page: Page, feed_selector: str, target: int
-    ) -> int:
-        """Scroll the results feed until *target* cards are loaded or no more appear."""
-        prev_count = 0
-        stall_count = 0
-        for _ in range(30):  # max 30 scroll iterations
-            cards = await page.query_selector_all(f'{feed_selector} a[href*="/maps/place/"]')
-            count = len(cards)
-            if count >= target:
-                return count
-            if count == prev_count:
-                stall_count += 1
-                if stall_count >= 3:
-                    return count
-            else:
-                stall_count = 0
-            prev_count = count
+    async def _scroll_results(self, page: Page, *, scrolls: int = 8) -> None:
+        for i in range(scrolls):
+            try:
+                await page.evaluate(
+                    """() => {
+                        const feed = document.querySelector('[role="feed"]');
+                        if (feed) { feed.scrollTo(0, feed.scrollHeight); }
+                        else { window.scrollTo(0, document.body.scrollHeight); }
+                    }"""
+                )
+                await page.wait_for_timeout(2_500)
+            except Exception:
+                break
 
-            feed = await page.query_selector(feed_selector)
-            if feed:
-                await page.evaluate("(el) => el.scrollTop = el.scrollHeight", feed)
-            await random_delay(1, 2)
-        return prev_count
+    async def _scrape_place(self, page: Page, link: str) -> BusinessData | None:
+        biz = BusinessData(source=self.source_name, place_url=link)
 
-    async def _extract_card(self, page: Page, card) -> BusinessData | None:
-        """Click a result card and scrape the detail panel."""
-        biz = BusinessData(source=self.source_name)
+        await page.goto(link, wait_until="domcontentloaded", timeout=45_000)
+        await page.wait_for_timeout(2_500)
 
-        # Get basic info visible on the card
-        aria = await card.get_attribute("aria-label")
-        if aria:
-            biz.name = sanitize_text(aria)
-
+        # Skip permanently-closed listings.
         try:
-            await card.click()
-            await random_delay(1.5, 3)
+            body = await page.inner_text("body")
+            if body and "permanently closed" in body.lower():
+                return None
         except Exception:
-            return biz if biz.name else None
+            pass
 
-        # Name from header
-        name_el = await page.query_selector('h1[class*="header"], h1[class*="title"]')
-        if name_el:
-            txt = await name_el.inner_text()
-            if txt:
-                biz.name = sanitize_text(txt)
+        # Name from the H1 header.
+        try:
+            h1 = await page.query_selector("h1")
+            if h1:
+                biz.name = sanitize_text(await h1.inner_text())
+        except Exception:
+            pass
 
-        # Rating
-        rating_el = await page.query_selector('span[aria-hidden="true"][role="img"], div[class*="rating"] span')
-        if rating_el:
-            biz.rating = safe_float(await rating_el.inner_text())
+        # Core details via a single evaluate (stable Maps selectors).
+        info = await page.evaluate(
+            r"""() => {
+                const r = { address: "", phone: "", website: "", rating: "", reviews: "", category: "" };
 
-        # Reviews count
-        review_el = await page.query_selector('button[aria-label*="reviews"], span[aria-label*="reviews"]')
-        if review_el:
-            label = await review_el.get_attribute("aria-label") or await review_el.inner_text()
-            biz.reviews_count = safe_int(label)
+                let catEl = document.querySelector('.DkEaL, .mgr77e, .LBgpqf .fontBodyMedium, button[jsaction*="category"]');
+                if (catEl && catEl.innerText) r.category = catEl.innerText.trim();
 
-        # Category
-        cat_el = await page.query_selector('button[jsaction*="category"], span[class*="category"]')
-        if cat_el:
-            biz.category = sanitize_text(await cat_el.inner_text())
+                const addrBtn = document.querySelector('button[data-item-id*="address"]');
+                if (addrBtn) {
+                    const aria = addrBtn.getAttribute('aria-label') || '';
+                    if (aria.toLowerCase().includes('address:')) r.address = aria.replace(/^Address:\s*/i, '').trim();
+                    else r.address = (addrBtn.innerText || '').trim().replace(/\n/g, ', ');
+                }
 
-        # Address, phone, website from info rows
-        info_buttons = await page.query_selector_all('button[data-item-id], a[data-item-id]')
-        for btn in info_buttons:
-            item_id = await btn.get_attribute("data-item-id") or ""
-            aria_label = await btn.get_attribute("aria-label") or ""
-            if item_id.startswith("address") or "address" in aria_label.lower():
-                biz.address = sanitize_text(aria_label.replace("Address:", "").strip())
-            elif item_id.startswith("phone") or "phone" in aria_label.lower():
-                biz.phone = sanitize_text(aria_label.replace("Phone:", "").strip())
-            elif item_id.startswith("authority") or "website" in aria_label.lower():
-                biz.website = sanitize_text(aria_label.replace("Website:", "").strip())
+                const phoneBtn = document.querySelector('button[data-item-id*="phone"]');
+                if (phoneBtn) {
+                    const aria = phoneBtn.getAttribute('aria-label') || '';
+                    if (aria.toLowerCase().includes('phone:')) {
+                        r.phone = aria.replace(/^Phone:\s*/i, '').trim();
+                    } else {
+                        const container = phoneBtn.closest('div[role="region"]') || phoneBtn.parentElement;
+                        if (container) {
+                            for (const div of container.querySelectorAll('div')) {
+                                const txt = (div.innerText || '').trim();
+                                const digits = txt.replace(/\D/g, '');
+                                if (digits.length >= 10 && digits.length <= 13 && /^[\d\s\+\-\(\)]+$/.test(txt)) { r.phone = txt; break; }
+                            }
+                        }
+                    }
+                }
 
-        # Fallback: grab href for website
-        if not biz.website:
-            website_link = await page.query_selector('a[data-item-id="authority"], a[aria-label*="Website"]')
-            if website_link:
-                href = await website_link.get_attribute("href")
-                if href and "google" not in href:
-                    biz.website = href
+                const webBtn = document.querySelector('a[data-item-id*="authority"]');
+                if (webBtn) {
+                    let href = webBtn.href || '';
+                    if (href.includes('google.com/url?q=')) {
+                        const m = href.match(/[?&]q=([^&]+)/);
+                        if (m) href = decodeURIComponent(m[1]);
+                    }
+                    r.website = href;
+                }
 
-        # Opening hours
-        hours_el = await page.query_selector('div[aria-label*="Monday"], table[class*="hour"]')
-        if hours_el:
-            aria_label = await hours_el.get_attribute("aria-label") or ""
-            biz.opening_hours = self._parse_hours(aria_label)
+                const rateDiv = document.querySelector('div[class*="F7nice"]');
+                if (rateDiv) {
+                    const m = (rateDiv.innerText || '').match(/([\d.]+)\s*\(([\d,]+)\)/);
+                    if (m) { r.rating = m[1]; r.reviews = m[2].replace(/,/g, ''); }
+                }
+                return r;
+            }"""
+        )
 
-        # Coordinates from URL
-        current_url = page.url
-        coord_match = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", current_url)
-        if coord_match:
-            biz.latitude = float(coord_match.group(1))
-            biz.longitude = float(coord_match.group(2))
+        biz.address = sanitize_text(re.sub(r"^[,.\s]+", "", info.get("address", "") or ""))
+        phone = sanitize_text(info.get("phone", "") or "")
+        biz.phone = phone if len(re.sub(r"\D", "", phone)) >= 10 else ""
+        website = (info.get("website", "") or "").strip()
+        biz.website = website if website and "google.com" not in website else ""
+        biz.category = sanitize_text(info.get("category", "") or "")
+        biz.rating = safe_float(info.get("rating", "")) if info.get("rating") else 0.0
+        biz.reviews_count = safe_int(info.get("reviews", "")) if info.get("reviews") else 0
+
+        # Coordinates from the place URL.
+        coord = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", page.url)
+        if coord:
+            biz.latitude = float(coord.group(1))
+            biz.longitude = float(coord.group(2))
+
+        # Recent reviews (best effort).
+        try:
+            biz.reviews = await self._extract_reviews(page, 20)
+        except Exception:
+            biz.reviews = []
 
         return biz
 
-    async def _extract_review(self, el) -> ReviewData | None:
-        review = ReviewData(source=self.source_name)
+    async def _extract_reviews(self, page: Page, max_reviews: int) -> list[dict]:
+        """Open the Reviews tab and extract recent reviews."""
+        try:
+            tab = page.locator(
+                'button[role="tab"]:has-text("Reviews"), '
+                'button[aria-label*="Reviews"], '
+                'button[jsaction*="reviewChart"]'
+            )
+            if await tab.count() > 0:
+                await tab.first.click(timeout=5_000)
+                await page.wait_for_timeout(2_500)
+            else:
+                return []
+        except Exception:
+            return []
 
-        name_el = await el.query_selector('div[class*="name"], a[class*="name"]')
-        if name_el:
-            review.reviewer_name = sanitize_text(await name_el.inner_text())
+        # Scroll the reviews pane to load more.
+        for _ in range(3):
+            try:
+                await page.evaluate(
+                    """() => {
+                        const panes = document.querySelectorAll('.m6QErb.DxyBCb.kA9KIf.dS8AEf, div[class*="m6QErb"][tabindex="-1"]');
+                        if (panes.length) { const t = panes[panes.length - 1]; t.scrollTo(0, t.scrollHeight); }
+                    }"""
+                )
+                await page.wait_for_timeout(1_500)
+            except Exception:
+                break
 
-        rating_el = await el.query_selector('span[role="img"]')
-        if rating_el:
-            aria = await rating_el.get_attribute("aria-label") or ""
-            review.rating = safe_int(aria)
-
-        text_el = await el.query_selector('span[class*="text"], div[class*="text"]')
-        if text_el:
-            review.text = sanitize_text(await text_el.inner_text())
-
-        date_el = await el.query_selector('span[class*="date"], span[class*="time"]')
-        if date_el:
-            review.date = sanitize_text(await date_el.inner_text())
-
-        return review
-
-    @staticmethod
-    def _parse_hours(text: str) -> dict[str, str]:
-        hours: dict[str, str] = {}
-        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        for day in days:
-            pattern = rf"{day},?\s*([\d:]+\s*[APMapm]*\s*(?:to|–|-)\s*[\d:]+\s*[APMapm]*|Closed|Open 24 hours)"
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                hours[day] = sanitize_text(match.group(1))
-        return hours
+        try:
+            reviews = await page.evaluate(
+                r"""(maxReviews) => {
+                    const blocks = document.querySelectorAll('div.jftiEf, div[data-review-id]');
+                    const out = [];
+                    for (let i = 0; i < Math.min(blocks.length, maxReviews); i++) {
+                        const b = blocks[i];
+                        const nameEl = b.querySelector('.d4r55, div[class*="fontTitleMedium"]');
+                        const dateEl = b.querySelector('.rsqaWe, span[class*="rsqaWe"]');
+                        const textEl = b.querySelector('.MyEned, span[class*="wiI7pd"]');
+                        const starEl = b.querySelector('span[role="img"][aria-label*="star"], .kvMYJc');
+                        let rating = 0;
+                        if (starEl) {
+                            const al = starEl.getAttribute('aria-label') || '';
+                            const m = al.match(/([\d.]+)/);
+                            if (m) rating = Math.round(parseFloat(m[1]));
+                        }
+                        const text = textEl ? (textEl.innerText || '').trim().replace(/\n/g, ' ') : '';
+                        if (text) {
+                            out.push({
+                                reviewer_name: nameEl ? (nameEl.innerText || '').trim() : 'Anonymous',
+                                rating: rating,
+                                text: text,
+                                date: dateEl ? (dateEl.innerText || '').trim() : '',
+                            });
+                        }
+                    }
+                    return out;
+                }""",
+                max_reviews,
+            )
+            return reviews or []
+        except Exception:
+            return []

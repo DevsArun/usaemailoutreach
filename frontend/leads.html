@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <link rel="stylesheet" href="css/custom.css">
   <!-- AG Grid -->
   <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@35.3.1/dist/ag-grid-community.min.js"></script>
@@ -25,6 +24,7 @@
           <p>Browse, filter, and manage all discovered business leads.</p>
         </div>
         <div class="header-actions">
+          <button class="btn btn-success btn-sm" onclick="Leads.verifyAndGenerate()" title="Re-verify all pending emails, then auto-generate AI outreach for valid leads">✅ Verify Emails &amp; Generate</button>
           <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export CSV</button>
           <button class="btn btn-primary btn-sm" onclick="Leads.loadLeads()">🔄 Refresh</button>
         </div>
@@ -64,8 +64,8 @@
           <!-- Bulk Actions (hidden by default) -->
           <div id="bulkActions" style="display:none;align-items:center;gap:0.5rem;margin-left:auto;">
             <span style="font-size:0.78rem;color:var(--text-muted);"><span id="selectedCount">0</span> selected</span>
-            <button class="btn btn-primary btn-sm" onclick="alert('Batch email feature — select leads and send outreach')">✉️ Send Email</button>
             <button class="btn btn-secondary btn-sm" onclick="Leads.exportCSV()">📥 Export</button>
+            <button class="btn btn-danger btn-sm" onclick="Leads.deleteSelected()">🗑 Delete Selected</button>
           </div>
         </div>
       </div>

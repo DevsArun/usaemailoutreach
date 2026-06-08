@@ -2,11 +2,28 @@ const express = require('express');
 const { OutreachEmail, Business, Campaign, Followup } = require('../models');
 const authenticate = require('../middleware/auth');
 const { callGroq } = require('../config/groq');
-const { getEmailQueue } = require('../queues');
+const { enqueue } = require('../queues');
+const { syncRepliesForUser } = require('../services/imapService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 router.use(authenticate);
+
+// Manually trigger an inbound reply sync for the current user's mailboxes.
+router.post('/sync', async (req, res, next) => {
+  try {
+    const result = await syncRepliesForUser(req.user.id);
+    res.json({
+      success: true,
+      message: result.accountsChecked === 0
+        ? 'No SMTP accounts configured. Add one in Settings to receive replies.'
+        : `Checked ${result.accountsChecked} mailbox(es). ${result.newReplies} new repl${result.newReplies === 1 ? 'y' : 'ies'} found.`,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try {
@@ -21,7 +38,7 @@ router.get('/', async (req, res, next) => {
     const include = [{
       model: Business,
       as: 'business',
-      attributes: ['id', 'name', 'website', 'category'],
+      attributes: ['id', 'campaign_id', 'name', 'website', 'category'],
       include: [{
         model: Campaign,
         as: 'campaign',
@@ -86,8 +103,7 @@ router.post('/:id/respond', async (req, res, next) => {
       status: 'approved',
     });
 
-    const emailQueue = getEmailQueue();
-    await emailQueue.add('send-followup', {
+    await enqueue('email-queue', 'send-followup', {
       followupId: followup.id,
       outreachId: outreach.id,
       userId: req.user.id,

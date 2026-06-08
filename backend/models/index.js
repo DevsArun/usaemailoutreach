@@ -256,6 +256,7 @@ const OutreachEmail = sequelize.define('outreach_emails', {
   ai_context: { type: DataTypes.JSONB },
   error_message: { type: DataTypes.TEXT },
   sequence_number: { type: DataTypes.INTEGER, defaultValue: 1 },
+  message_id: { type: DataTypes.STRING(998) },
 });
 
 const Followup = sequelize.define('followups', {
@@ -302,6 +303,9 @@ const SmtpAccount = sequelize.define('smtp_accounts', {
   host: { type: DataTypes.STRING(255) },
   port: { type: DataTypes.INTEGER },
   secure: { type: DataTypes.BOOLEAN, defaultValue: true },
+  imap_host: { type: DataTypes.STRING(255) },
+  imap_port: { type: DataTypes.INTEGER },
+  last_reply_check: { type: DataTypes.DATE },
   daily_limit: { type: DataTypes.INTEGER, defaultValue: 500 },
   sent_today: { type: DataTypes.INTEGER, defaultValue: 0 },
   last_reset: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW },

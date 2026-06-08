@@ -3,7 +3,7 @@ const { OutreachEmail, Business, Campaign, Email, Followup } = require('../model
 const authenticate = require('../middleware/auth');
 const { outreachEditValidation, paginationValidation } = require('../utils/validators');
 const { buildPaginationMeta } = require('../utils/helpers');
-const { getEmailQueue } = require('../queues');
+const { enqueue } = require('../queues');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -26,7 +26,10 @@ router.get('/', paginationValidation, async (req, res, next) => {
         {
           model: Business,
           as: 'business',
-          attributes: ['id', 'name', 'website', 'lead_score', 'category'],
+          // campaign_id (the FK) MUST be selected so Sequelize can build the
+          // nested Campaign join in the findAndCountAll COUNT query — without
+          // it Postgres errors: column "business.campaign_id" does not exist.
+          attributes: ['id', 'campaign_id', 'name', 'website', 'lead_score', 'category'],
           include: [{
             model: Campaign,
             as: 'campaign',
@@ -37,7 +40,7 @@ router.get('/', paginationValidation, async (req, res, next) => {
         {
           model: Followup,
           as: 'followups',
-          attributes: ['id', 'sequence_number', 'status', 'sent_at'],
+          attributes: ['id', 'outreach_id', 'sequence_number', 'status', 'sent_at'],
         },
       ],
       order: [['created_at', 'DESC']],
@@ -200,8 +203,7 @@ router.post('/:id/send', async (req, res, next) => {
 
     await outreach.update({ status: 'queued' });
 
-    const emailQueue = getEmailQueue();
-    await emailQueue.add('send-outreach', {
+    await enqueue('email-queue', 'send-outreach', {
       outreachId: outreach.id,
       userId: req.user.id,
     }, {
@@ -258,12 +260,11 @@ router.post('/send-bulk', async (req, res, next) => {
       where: { id: outreach_ids, status: 'approved' },
     });
 
-    const emailQueue = getEmailQueue();
     let queued = 0;
 
     for (const outreach of outreachEmails) {
       await outreach.update({ status: 'queued' });
-      await emailQueue.add('send-outreach', {
+      await enqueue('email-queue', 'send-outreach', {
         outreachId: outreach.id,
         userId: req.user.id,
       }, {

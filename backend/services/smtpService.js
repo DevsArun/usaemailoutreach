@@ -1,8 +1,12 @@
 const nodemailer = require('nodemailer');
+const axios = require('axios');
 const { SmtpAccount, OutreachEmail, Followup, AnalyticsEvent, Business } = require('../models');
 const logger = require('../utils/logger');
 
 const transporterCache = new Map();
+
+// Sentinel host marking a Brevo (HTTP API) sender.
+const BREVO_HOST = 'brevo-api';
 
 function getTransporter(account) {
   const key = `${account.id}_${account.email}`;
@@ -23,10 +27,64 @@ function getTransporter(account) {
     maxMessages: 100,
     rateDelta: 2000,
     rateLimit: 5,
+    // Bounded timeouts so a blocked/filtered SMTP port fails fast with a clear
+    // error instead of hanging the send job indefinitely.
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    tls: { rejectUnauthorized: false },
   });
 
   transporterCache.set(key, transporter);
   return transporter;
+}
+
+/**
+ * Send an email through the Brevo transactional API over HTTPS (port 443).
+ * Works on hosts where outbound SMTP ports are blocked (e.g. HF Spaces).
+ * account.password holds the Brevo API key; account.email is the (verified)
+ * sender address.
+ */
+async function sendViaBrevo(account, { to, subject, html, text }) {
+  try {
+    const resp = await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender: { email: account.email, name: account.email.split('@')[0] },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }, {
+      headers: {
+        'api-key': account.password,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      timeout: 20000,
+    });
+    return { messageId: (resp.data && resp.data.messageId) || `brevo-${Date.now()}` };
+  } catch (e) {
+    const msg = (e.response && e.response.data && e.response.data.message) || e.message;
+    const err = new Error(`Brevo: ${msg}`);
+    err.brevo = true;
+    throw err;
+  }
+}
+
+function isBrevo(account) {
+  return account.host === BREVO_HOST;
+}
+
+async function deliver(account, mailOptions) {
+  if (isBrevo(account)) {
+    return sendViaBrevo(account, {
+      to: mailOptions.to,
+      subject: mailOptions.subject,
+      html: mailOptions.html,
+      text: mailOptions.text,
+    });
+  }
+  const transporter = getTransporter(account);
+  return transporter.sendMail(mailOptions);
 }
 
 async function getAvailableSmtpAccount(userId) {
@@ -64,11 +122,9 @@ async function sendOutreachEmail(outreachId, userId) {
 
   const account = await getAvailableSmtpAccount(userId);
   if (!account) {
-    await outreach.update({ status: 'failed', error_message: 'No available SMTP accounts' });
-    throw new Error('No available SMTP accounts with remaining daily limit');
+    await outreach.update({ status: 'failed', error_message: 'No available sending accounts' });
+    throw new Error('No available sending accounts with remaining daily limit');
   }
-
-  const transporter = getTransporter(account);
 
   const mailOptions = {
     from: `"${account.email.split('@')[0]}" <${account.email}>`,
@@ -84,13 +140,14 @@ async function sendOutreachEmail(outreachId, userId) {
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const info = await deliver(account, mailOptions);
 
     await outreach.update({
       status: 'sent',
       sent_at: new Date(),
       from_email: account.email,
       smtp_account_id: account.id,
+      message_id: info.messageId || null,
     });
 
     await account.update({ sent_today: account.sent_today + 1 });
@@ -116,7 +173,7 @@ async function sendOutreachEmail(outreachId, userId) {
       },
     });
 
-    logger.info(`Email sent: ${outreach.id} to ${outreach.to_email} via ${account.email}`);
+    logger.info(`Email sent: ${outreach.id} to ${outreach.to_email} via ${isBrevo(account) ? 'Brevo' : account.email}`);
     return info;
   } catch (error) {
     await outreach.update({
@@ -124,7 +181,9 @@ async function sendOutreachEmail(outreachId, userId) {
       error_message: error.message,
     });
 
-    if (error.responseCode >= 500) {
+    // Mark the account as errored on auth/connection failures so it isn't
+    // reused for every subsequent send (and surface the reason in Settings).
+    if (error.brevo || error.responseCode >= 500 || /auth|invalid login|econn|etimedout|timed out|ehostunreach/i.test(error.message || '')) {
       await account.update({
         status: 'error',
         error_message: error.message,
@@ -153,10 +212,8 @@ async function sendFollowupEmail(followupId, outreachId, userId) {
   const account = await getAvailableSmtpAccount(userId);
   if (!account) {
     await followup.update({ status: 'failed' });
-    throw new Error('No available SMTP accounts');
+    throw new Error('No available sending accounts');
   }
-
-  const transporter = getTransporter(account);
 
   const mailOptions = {
     from: `"${account.email.split('@')[0]}" <${account.email}>`,
@@ -170,7 +227,7 @@ async function sendFollowupEmail(followupId, outreachId, userId) {
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const info = await deliver(account, mailOptions);
 
     await followup.update({
       status: 'sent',

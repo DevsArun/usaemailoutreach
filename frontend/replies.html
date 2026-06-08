@@ -8,7 +8,6 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
   <link rel="stylesheet" href="css/custom.css">
 </head>
 <body>
@@ -27,6 +26,7 @@
             <span class="search-icon">🔍</span>
             <input type="text" placeholder="Search replies..." id="replySearch">
           </div>
+          <button class="btn btn-primary btn-sm" id="syncRepliesBtn" onclick="Replies.syncInbox()">📥 Sync Inbox</button>
           <button class="btn btn-secondary btn-sm" onclick="Replies.loadReplies()">🔄 Refresh</button>
         </div>
       </div>
@@ -61,7 +61,7 @@
       </div>
 
       <!-- Split Layout -->
-      <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:1rem;min-height:500px;">
+      <div class="reply-split-view" style="display:grid;grid-template-columns:1fr 1.2fr;gap:1rem;min-height:500px;">
         <!-- Reply List -->
         <div class="glass-card-static" style="overflow-y:auto;max-height:calc(100vh - 320px);">
           <div id="repliesList">

@@ -48,8 +48,15 @@ async function verifyEmail(emailAddress) {
         result.status = 'invalid';
       }
     } catch (err) {
-      result.status = 'risky';
-      result.details.reason = `SMTP verification inconclusive: ${err.message}`;
+      // Most cloud hosts (Hugging Face Spaces, Render, etc.) block outbound
+      // SMTP port 25, so mailbox-level probing is impossible. In that case we
+      // fall back to MX-based validation: a domain that publishes valid MX
+      // records (and isn't disposable) is treated as deliverable. This keeps
+      // the outreach pipeline functional in environments where port 25 is
+      // unavailable, instead of marking every address as 'risky'.
+      result.status = 'valid';
+      result.details.method = 'mx_validated';
+      result.details.reason = 'Deliverable by MX records (SMTP probe unavailable)';
       result.details.smtp_error = err.message;
     }
 

@@ -21,7 +21,18 @@ const Replies = (() => {
     try {
       const result = await API.replies.list();
       const data = result.data || result;
-      replies = data.replies || (Array.isArray(data) ? data : []);
+      const raw = data.replies || (Array.isArray(data) ? data : []);
+      // Normalize backend OutreachEmail fields → the shape this UI expects.
+      replies = raw.map(r => ({
+        ...r,
+        sender: r.sender || (r.business && r.business.name) || r.to_email || 'Unknown',
+        from_email: r.from_email || r.to_email || '',
+        classification: r.classification || r.reply_classification || 'unclassified',
+        body: r.body || r.content || r.reply_text || '',
+        received_at: r.received_at || r.replied_at || r.created_at,
+        responded: r.responded ?? (Array.isArray(r.followups) && r.followups.length > 0),
+        read: r.read ?? false,
+      }));
       renderList(replies);
       updateStats(replies);
     } catch {
@@ -248,5 +259,20 @@ const Replies = (() => {
     // Quick reply form is set up dynamically in renderDetail
   }
 
-  return { init, selectReply, sendReply, insertTemplate, loadReplies };
+  async function syncInbox() {
+    const btn = document.getElementById('syncRepliesBtn');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Syncing...'; }
+    try {
+      const result = await API.replies.sync();
+      Toast.success(result.message || 'Inbox synced.');
+      await loadReplies();
+    } catch (err) {
+      Toast.error(err.message || 'Failed to sync inbox.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = orig || '📥 Sync Inbox'; }
+    }
+  }
+
+  return { init, selectReply, sendReply, insertTemplate, loadReplies, syncInbox };
 })();
