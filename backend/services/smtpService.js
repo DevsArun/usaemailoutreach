@@ -23,6 +23,12 @@ function getTransporter(account) {
     maxMessages: 100,
     rateDelta: 2000,
     rateLimit: 5,
+    // Bounded timeouts so a blocked/filtered SMTP port fails fast with a clear
+    // error instead of hanging the send job indefinitely.
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    tls: { rejectUnauthorized: false },
   });
 
   transporterCache.set(key, transporter);
@@ -125,7 +131,9 @@ async function sendOutreachEmail(outreachId, userId) {
       error_message: error.message,
     });
 
-    if (error.responseCode >= 500) {
+    // Mark the account as errored on auth/connection failures so it isn't
+    // reused for every subsequent send (and surface the reason in Settings).
+    if (error.responseCode >= 500 || /auth|invalid login|econn|etimedout|timed out|ehostunreach/i.test(error.message || '')) {
       await account.update({
         status: 'error',
         error_message: error.message,
