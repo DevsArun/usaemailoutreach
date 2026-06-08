@@ -180,32 +180,13 @@ router.get('/:id/reviews', async (req, res, next) => {
   }
 });
 
-// Re-verify all pending/risky emails, then auto-generate AI outreach for any
-// business that now has a valid email but no draft yet. Runs in the background
-// so the request returns immediately (verification can take a while).
+// Re-verify pending emails, re-crawl websites of businesses that still have no
+// valid email, then auto-generate AI outreach for any valid lead without a
+// draft. Runs in the background so the request returns immediately.
 router.post('/verify-emails', async (req, res, next) => {
   try {
     const { campaign_id } = req.body || {};
 
-    // Count what's pending so we can give the user a meaningful response now.
-    const pendingCount = await Email.count({
-      where: { verification_status: { [Op.in]: ['pending', 'risky', 'catch_all', 'invalid'] } },
-      include: [{
-        model: Business,
-        as: 'business',
-        required: true,
-        attributes: [],
-        include: [{
-          model: Campaign,
-          as: 'campaign',
-          required: true,
-          attributes: [],
-          where: { user_id: req.user.id, ...(campaign_id ? { id: campaign_id } : {}) },
-        }],
-      }],
-    });
-
-    // Fire-and-forget: verify + generate outreach in the background.
     setImmediate(() => {
       reverifyAndGenerate(req.user.id, campaign_id)
         .catch(err => logger.error('verify-emails background error:', err.message));
@@ -213,10 +194,7 @@ router.post('/verify-emails', async (req, res, next) => {
 
     res.json({
       success: true,
-      message: pendingCount > 0
-        ? `Verifying ${pendingCount} email(s) in the background. Valid ones are kept and AI outreach is generated automatically — refresh Leads/Outreach in a minute.`
-        : 'No pending emails. Generating outreach for any valid leads without a draft — refresh Outreach in a minute.',
-      data: { pending: pendingCount },
+      message: 'Working in the background: re-verifying emails, searching business websites for missing emails, and generating AI outreach for valid leads. Refresh Leads & Outreach in 1-2 minutes.',
     });
   } catch (error) {
     next(error);

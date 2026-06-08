@@ -32,6 +32,10 @@ const Leads = (() => {
     }
   }
 
+  function hasValidEmail(lead) {
+    return Array.isArray(lead.emails) && lead.emails.some(e => e.verification_status === 'valid');
+  }
+
   function updateLeadStats(leads) {
     const total = document.getElementById('totalLeads');
     const withEmail = document.getElementById('leadsWithEmail');
@@ -39,7 +43,7 @@ const Leads = (() => {
     const highScore = document.getElementById('highScoreLeads');
 
     if (total) total.textContent = leads.length;
-    if (withEmail) withEmail.textContent = leads.filter(l => (Array.isArray(l.emails) && l.emails.length > 0) || l.email || l.email_status === 'found' || l.email_status === 'valid').length;
+    if (withEmail) withEmail.textContent = leads.filter(hasValidEmail).length;
     if (avgScore) {
       const scores = leads.filter(l => l.lead_score != null).map(l => l.lead_score);
       avgScore.textContent = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
@@ -128,21 +132,19 @@ const Leads = (() => {
         comparator: (a, b) => (a || 0) - (b || 0),
       },
       {
-        headerName: 'Email Status',
+        headerName: 'Email',
         field: 'email_status',
         width: 120,
         valueGetter: (params) => {
           const emails = params.data.emails;
-          if (Array.isArray(emails) && emails.length) {
-            if (emails.some(e => e.verification_status === 'valid')) return 'valid';
-            return 'found';
-          }
-          return params.data.email_status || 'pending';
+          if (Array.isArray(emails) && emails.some(e => e.verification_status === 'valid')) return 'valid';
+          return 'none';
         },
         cellRenderer: (params) => {
-          const status = params.value || 'pending';
-          const color = Utils.getStatusColor(status);
-          return `<span class="badge badge-${color}" style="text-transform:capitalize;">${status}</span>`;
+          if (params.value === 'valid') {
+            return `<span class="badge badge-success" style="text-transform:capitalize;">valid</span>`;
+          }
+          return `<span class="badge badge-neutral">No email</span>`;
         },
       },
       {
@@ -259,6 +261,10 @@ const Leads = (() => {
       const body = document.getElementById('leadDetailBody');
       if (!body) return;
 
+      const emailLine = (Array.isArray(lead.emails) && lead.emails.length)
+        ? lead.emails.map(e => `${Utils.escapeHtml(e.email)}${e.verification_status === 'valid' ? ' ✓' : ''}`).join(', ')
+        : (lead.email ? Utils.escapeHtml(lead.email) : '—');
+
       body.innerHTML = `
         <div style="margin-bottom:1.25rem;">
           <h4 style="font-size:1.1rem;font-weight:700;margin-bottom:0.25rem;">${Utils.escapeHtml(lead.name || 'Unknown')}</h4>
@@ -279,7 +285,7 @@ const Leads = (() => {
           </div>
           <div style="padding:0.65rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:0.1rem;">Email</div>
-            <div style="font-size:0.82rem;">${(Array.isArray(lead.emails) && lead.emails.length ? Utils.escapeHtml(lead.emails[0].email) : (lead.email ? Utils.escapeHtml(lead.email) : '—'))}</div>
+            <div style="font-size:0.82rem;">${emailLine}</div>
           </div>
           <div style="padding:0.65rem;background:#f9fafb;border-radius:0.5rem;">
             <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:0.1rem;">Website</div>
@@ -369,20 +375,20 @@ const Leads = (() => {
     }
   }
 
-  // Re-verify all pending/risky emails, then auto-generate AI outreach for any
-  // valid lead that doesn't have a draft yet. Runs in the background on the server.
+  // Re-verify pending emails, re-crawl websites for missing emails, then
+  // auto-generate AI outreach for valid leads without a draft. Runs on the server.
   async function verifyAndGenerate() {
-    if (!confirm('Re-verify all pending emails and auto-generate AI outreach for valid leads?\n\n(Make sure a Groq API key is added in Settings — outreach needs it.)')) return;
+    if (!confirm('Re-verify emails, search business websites for missing emails, and auto-generate AI outreach for valid leads?\n\n(Make sure a Groq API key is added in Settings — outreach needs it.)')) return;
     const campaignFilter = document.getElementById('leadCampaignFilter');
     const params = new URLSearchParams(window.location.search);
     const cid = (campaignFilter && campaignFilter.value) || params.get('campaign_id') || null;
     try {
       const result = await API.businesses.verifyEmails(cid);
-      Toast.success(result.message || 'Verification started.', 'Verifying', 7000);
-      // Refresh leads after a short delay so newly-valid emails appear.
-      setTimeout(() => loadLeads(), 8000);
+      Toast.success(result.message || 'Started in the background.', 'Working');
+      // Refresh leads after a short delay so newly-found emails appear.
+      setTimeout(() => loadLeads(), 12000);
     } catch (err) {
-      Toast.error(err.message || 'Failed to start verification.');
+      Toast.error(err.message || 'Failed to start.');
     }
   }
 
