@@ -1,5 +1,5 @@
 const express = require('express');
-const { OutreachEmail, Business, Campaign, Email, Followup } = require('../models');
+const { OutreachEmail, Business, Campaign, Email, Followup, Setting } = require('../models');
 const authenticate = require('../middleware/auth');
 const { outreachEditValidation, paginationValidation } = require('../utils/validators');
 const { buildPaginationMeta } = require('../utils/helpers');
@@ -258,24 +258,46 @@ router.post('/send-bulk', async (req, res, next) => {
       where: { id: outreach_ids, status: 'approved' },
     });
 
+    // Gap (seconds) between consecutive emails — improves inbox placement by
+    // avoiding a single burst. Uses the user's "email_delay_seconds" setting,
+    // falling back to EMAIL_SEND_GAP_SECONDS env or 30s.
+    const gapSetting = await Setting.findOne({
+      where: { user_id: req.user.id, key: 'email_delay_seconds' },
+    });
+    let gapSeconds = parseInt(gapSetting && gapSetting.value);
+    if (isNaN(gapSeconds) || gapSeconds < 0) {
+      gapSeconds = parseInt(process.env.EMAIL_SEND_GAP_SECONDS) || 30;
+    }
+
     const emailQueue = getEmailQueue();
     let queued = 0;
+    let index = 0;
 
     for (const outreach of outreachEmails) {
       await outreach.update({ status: 'queued' });
+
+      // Stagger each email: progressive delay + small random jitter so sends
+      // look natural instead of perfectly timed.
+      const jitterMs = Math.floor(Math.random() * Math.min(gapSeconds * 1000, 8000));
+      const delayMs = index * gapSeconds * 1000 + jitterMs;
+
       await emailQueue.add('send-outreach', {
         outreachId: outreach.id,
         userId: req.user.id,
       }, {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
+        delay: delayMs,
       });
       queued++;
+      index++;
     }
 
     res.json({
       success: true,
-      message: `${queued} email(s) queued for sending.`,
+      message: gapSeconds > 0
+        ? `${queued} email(s) queued — sending ~${gapSeconds}s apart for better inbox placement.`
+        : `${queued} email(s) queued for sending.`,
     });
   } catch (error) {
     next(error);

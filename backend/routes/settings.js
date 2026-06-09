@@ -4,6 +4,7 @@ const { SmtpAccount, GroqKey, Setting } = require('../models');
 const authenticate = require('../middleware/auth');
 const { smtpValidation, groqKeyValidation } = require('../utils/validators');
 const { groqKeyManager } = require('../config/groq');
+const httpEmail = require('../services/httpEmailService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -179,6 +180,18 @@ router.post('/smtp/:id/test', async (req, res, next) => {
 
     if (!account) {
       return res.status(404).json({ success: false, message: 'SMTP account not found.' });
+    }
+
+    // If an HTTP email provider is configured (e.g. on Hugging Face Spaces /
+    // Render where SMTP ports are blocked), test the provider API over HTTPS
+    // instead of attempting a raw SMTP connection that would time out.
+    if (httpEmail.isHttpProviderEnabled()) {
+      await httpEmail.verifyHttpProvider();
+      await account.update({ status: 'active', error_message: null });
+      return res.json({
+        success: true,
+        message: `Email API (${httpEmail.getProvider()}) connection test successful. Emails will be sent over HTTPS from ${account.email}.`,
+      });
     }
 
     const transporter = nodemailer.createTransport({

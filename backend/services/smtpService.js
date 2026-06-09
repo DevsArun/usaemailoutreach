@@ -1,8 +1,44 @@
 const nodemailer = require('nodemailer');
 const { SmtpAccount, OutreachEmail, Followup, AnalyticsEvent, Business } = require('../models');
 const logger = require('../utils/logger');
+const httpEmail = require('./httpEmailService');
 
 const transporterCache = new Map();
+
+/**
+ * Deliver an email using whichever transport is available.
+ * - If an HTTP email provider is configured (EMAIL_HTTP_PROVIDER), send over
+ *   HTTPS (works on Hugging Face Spaces / Render where SMTP ports are blocked).
+ * - Otherwise fall back to raw SMTP via nodemailer (works on a VPS).
+ * The `account` email is always used as the From address so per-account
+ * sending and daily limits behave the same regardless of transport.
+ */
+async function deliver(account, { to, subject, html, text, headers }) {
+  const fromName = account.email.split('@')[0];
+
+  if (httpEmail.isHttpProviderEnabled()) {
+    return httpEmail.sendViaHttp({
+      fromEmail: account.email,
+      fromName,
+      to,
+      subject,
+      html,
+      text,
+      replyTo: account.email,
+      headers,
+    });
+  }
+
+  const transporter = getTransporter(account);
+  return transporter.sendMail({
+    from: `"${fromName}" <${account.email}>`,
+    to,
+    subject,
+    html,
+    text,
+    headers,
+  });
+}
 
 function getTransporter(account) {
   const key = `${account.id}_${account.email}`;
@@ -68,23 +104,18 @@ async function sendOutreachEmail(outreachId, userId) {
     throw new Error('No available SMTP accounts with remaining daily limit');
   }
 
-  const transporter = getTransporter(account);
-
-  const mailOptions = {
-    from: `"${account.email.split('@')[0]}" <${account.email}>`,
-    to: outreach.to_email,
-    subject: outreach.subject,
-    html: formatEmailHtml(outreach.body),
-    text: outreach.body,
-    headers: {
-      'List-Unsubscribe': `<mailto:${account.email}?subject=unsubscribe>`,
-      'X-Campaign-ID': outreach.campaign_id.toString(),
-      'X-Outreach-ID': outreach.id.toString(),
-    },
-  };
-
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const info = await deliver(account, {
+      to: outreach.to_email,
+      subject: outreach.subject,
+      html: formatEmailHtml(outreach.body),
+      text: outreach.body,
+      headers: {
+        'List-Unsubscribe': `<mailto:${account.email}?subject=unsubscribe>`,
+        'X-Campaign-ID': outreach.campaign_id.toString(),
+        'X-Outreach-ID': outreach.id.toString(),
+      },
+    });
 
     await outreach.update({
       status: 'sent',
@@ -156,21 +187,16 @@ async function sendFollowupEmail(followupId, outreachId, userId) {
     throw new Error('No available SMTP accounts');
   }
 
-  const transporter = getTransporter(account);
-
-  const mailOptions = {
-    from: `"${account.email.split('@')[0]}" <${account.email}>`,
-    to: followup.outreach.to_email,
-    subject: followup.subject || `Re: ${followup.outreach.subject}`,
-    html: formatEmailHtml(followup.body),
-    text: followup.body,
-    headers: {
-      'List-Unsubscribe': `<mailto:${account.email}?subject=unsubscribe>`,
-    },
-  };
-
   try {
-    const info = await transporter.sendMail(mailOptions);
+    const info = await deliver(account, {
+      to: followup.outreach.to_email,
+      subject: followup.subject || `Re: ${followup.outreach.subject}`,
+      html: formatEmailHtml(followup.body),
+      text: followup.body,
+      headers: {
+        'List-Unsubscribe': `<mailto:${account.email}?subject=unsubscribe>`,
+      },
+    });
 
     await followup.update({
       status: 'sent',
