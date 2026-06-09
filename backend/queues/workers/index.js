@@ -87,8 +87,8 @@ async function initWorkers() {
     }
   }, {
     connection,
-    concurrency: 2,
-    limiter: { max: 3, duration: 10000 },
+    concurrency: 1,
+    limiter: { max: 1, duration: 2000 },
   });
 
   const outreachWorker = new Worker('outreach-queue', async (job) => {
